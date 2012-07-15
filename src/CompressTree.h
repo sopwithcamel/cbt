@@ -4,8 +4,8 @@
 #include <deque>
 #include <pthread.h>
 #include <queue>
-#include "CTConfig.h"
-#include "CTNode.h"
+#include "Config.h"
+#include "Node.h"
 #include "PartialAgg.h"
 
 namespace compresstree {
@@ -54,7 +54,7 @@ namespace compresstree {
         ~CompressTree();
 
         /* Insert record into tree */
-        bool aggregate(void* hash, PartialAgg* agg);
+        bool aggregate(const std::string& key, const std::string& value);
         /* read values */
         bool next(void*& hash, PartialAgg*& agg);
       private:

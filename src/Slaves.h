@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "CompressTree.h"
-#include "CTNode.h"
 #include "EmptyQueue.h"
+#include "Node.h"
 
 namespace compresstree {
     class CompressTree;

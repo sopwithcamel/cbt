@@ -7,7 +7,8 @@
 #include <time.h>
 
 #include "CompressTree.h"
-#include "CTNode.h"
+#include "Node.h"
+#include "HashUtil.h"
 #include "Slaves.h"
 
 namespace compresstree {
@@ -36,9 +37,10 @@ namespace compresstree {
         buffer_.cleanupPaging();
     }
 
-    bool Node::insert(uint64_t hash, PartialAgg* agg)
+    bool Node::insert(const std::string& key, const std::string& value)
     {
-        uint32_t hashv = (uint32_t)hash;
+        uint32_t hashv = HashUtil::MurmurHash(key, 42);
+        
         uint32_t buf_size = ((ProtobufPartialAgg*)agg)->serializedSize();
 
         // copy into Buffer fields

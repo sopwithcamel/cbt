@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <vector>
-#include "CTConfig.h"
+#include "Config.h"
 
 namespace compresstree {
     class Node;

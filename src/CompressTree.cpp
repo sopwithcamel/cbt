@@ -53,7 +53,8 @@ namespace compresstree {
         pthread_barrier_destroy(&threadsBarrier_);
     }
 
-    bool CompressTree::insert(void* hash, PartialAgg* agg)
+    bool CompressTree::aggregate(const std::string& key,
+            const std::string& value)
     {
         // copy buf into root node buffer
         // root node buffer always decompressed
@@ -89,7 +90,7 @@ namespace compresstree {
             sorter_->addNode(rootNode_);
             sorter_->wakeup();
         }
-        bool ret = inputNode_->insert(*(uint64_t*)hash, agg);
+        bool ret = inputNode_->insert(key, value);
         return ret;
     }
 

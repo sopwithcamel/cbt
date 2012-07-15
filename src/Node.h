@@ -7,10 +7,7 @@
 
 #include "Buffer.h"
 #include "CompressTree.h"
-#include "CTConfig.h"
-#include "ProtobufPartialAgg.h"
-
-#define CALL_MEM_FUNC(object,ptrToMember) ((object).*(ptrToMember))
+#include "Config.h"
 
 namespace compresstree {
 
@@ -75,7 +72,7 @@ namespace compresstree {
         ~Node();
         /* copy user data into buffer. Buffer should be decompressed
            before calling. */
-        bool insert(uint64_t hash, PartialAgg* agg);
+        bool insert(const std::string& key, const std::string& value);
 
         // identification functions
         bool isLeaf() const;
