@@ -8,16 +8,18 @@
 #include "CompressTree.h"
 #include "Slaves.h"
 
-namespace compresstree {
+namespace cbt {
 
     uint32_t BUFFER_SIZE;
     uint32_t MAX_ELS_PER_BUFFER;
     uint32_t EMPTY_THRESHOLD;
 
-    CompressTree::CompressTree(bool (*aggregateFunc)(const std::string& key,
-                const std::string& value1, const std::string& value2,
-                std::string& agg_value)) :
-        b_(8),
+    CompressTree::CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
+                uint32_t buffer_size, uint32_t pao_size,
+                size_t (*createPAOFunc)(Token* t, PartialAgg** p),
+                void (*destroyPAOFunc)(PartialAgg* p)) :
+        a_(a),
+        b_(b),
         nodeCtr(1),
         createPAO_(createPAOFunc),
         destroyPAO_(destroyPAOFunc),
@@ -26,7 +28,9 @@ namespace compresstree {
         lastLeafRead_(0),
         lastOffset_(0),
         lastElement_(0),
-        threadsStarted_(false)
+        threadsStarted_(false),
+        nodesInMemory_(nodesInMemory),
+        numEvicted_(0)
     {
         BUFFER_SIZE = buffer_size;
         MAX_ELS_PER_BUFFER = BUFFER_SIZE / pao_size;
@@ -53,8 +57,7 @@ namespace compresstree {
         pthread_barrier_destroy(&threadsBarrier_);
     }
 
-    bool CompressTree::aggregate(const std::string& key,
-            const std::string& value)
+    bool CompressTree::insert(void* hash, PartialAgg* agg)
     {
         // copy buf into root node buffer
         // root node buffer always decompressed
@@ -90,7 +93,7 @@ namespace compresstree {
             sorter_->addNode(rootNode_);
             sorter_->wakeup();
         }
-        bool ret = inputNode_->insert(key, value);
+        bool ret = inputNode_->insert(*(uint64_t*)hash, agg);
         return ret;
     }
 

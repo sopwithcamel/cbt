@@ -8,10 +8,9 @@
 
 #include "CompressTree.h"
 #include "Node.h"
-#include "HashUtil.h"
 #include "Slaves.h"
 
-namespace compresstree {
+namespace cbt {
     Node::Node(CompressTree* tree, uint32_t level) :
         tree_(tree),
         level_(level),
@@ -20,7 +19,9 @@ namespace compresstree {
     {
         id_ = tree_->nodeCtr++;
         buffer_.setParent(this); 
+#ifdef ENABLE_PAGING
         buffer_.setupPaging(); 
+#endif
 
         pthread_mutex_init(&queuedForEmptyMutex_, NULL);
         tree_->createPAO_(NULL, (PartialAgg**)&lastPAO);
@@ -34,13 +35,14 @@ namespace compresstree {
         tree_->destroyPAO_(lastPAO);
         tree_->destroyPAO_(thisPAO);
 
+#ifdef ENABLE_PAGING
         buffer_.cleanupPaging();
+#endif
     }
 
-    bool Node::insert(const std::string& key, const std::string& value)
+    bool Node::insert(uint64_t hash, PartialAgg* agg)
     {
-        uint32_t hashv = HashUtil::MurmurHash(key, 42);
-        
+        uint32_t hashv = (uint32_t)hash;
         uint32_t buf_size = ((ProtobufPartialAgg*)agg)->serializedSize();
 
         // copy into Buffer fields

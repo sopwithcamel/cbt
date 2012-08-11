@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "Slaves.h"
 
-namespace compresstree {
+namespace cbt {
     Slave::Slave(CompressTree* tree) :
             tree_(tree),
             inputComplete_(false),

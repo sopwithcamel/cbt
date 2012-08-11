@@ -8,7 +8,7 @@
 #include "Node.h"
 #include "PartialAgg.h"
 
-namespace compresstree {
+namespace cbt {
 
     extern uint32_t BUFFER_SIZE;
     extern uint32_t MAX_ELS_PER_BUFFER;
@@ -28,9 +28,7 @@ namespace compresstree {
     class Emptier;
     class Compressor;
     class Sorter;
-#ifdef ENABLE_PAGING
     class Pager;
-#endif
 #ifdef ENABLE_COUNTERS
     class Monitor;
 #endif
@@ -41,22 +39,21 @@ namespace compresstree {
         friend class Compressor;
         friend class Emptier;
         friend class Sorter;
-#ifdef ENABLE_PAGING
         friend class Pager;
-#endif
 #ifdef ENABLE_COUNTERS
         friend class Monitor;
 #endif
       public:
-        CompressTree(bool (*aggregateFunc)(const std::string& key,
-                const std::string& value1, const std::string& value2,
-                std::string& agg_value));
+        CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
+                uint32_t buffer_size, uint32_t pao_size,
+                size_t (*createPAOFunc)(Token* t, PartialAgg** p),
+                void (*destroyPAOFunc)(PartialAgg* p));
         ~CompressTree();
 
         /* Insert record into tree */
-        bool aggregate(const std::string& key, const std::string& value);
+        bool insert(void* hash, PartialAgg* agg);
         /* read values */
-        bool next(void*& hash, PartialAgg*& agg);
+        bool nextValue(void*& hash, PartialAgg*& agg);
       private:
         bool addLeafToEmpty(Node* node);
         bool createNewRoot(Node* otherChild);
@@ -88,6 +85,13 @@ namespace compresstree {
         /* Slave-threads */
         bool threadsStarted_;
         pthread_barrier_t threadsBarrier_;
+
+        /* Eviction-related */
+        uint32_t nodesInMemory_;
+        uint32_t numEvicted_;
+        char* evictedBuffer_;
+        uint32_t evictedBufferOffset_;
+        pthread_mutex_t evictedBufferMutex_;
 
         /* Members for async-emptying */
         Emptier* emptier_;

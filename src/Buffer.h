@@ -5,7 +5,7 @@
 #include <vector>
 #include "Config.h"
 
-namespace compresstree {
+namespace cbt {
     class Node;
 
     class Buffer {
@@ -75,8 +75,10 @@ namespace compresstree {
           bool empty() const;
           uint32_t numElements() const;
           void setParent(Node* n);
+#ifdef ENABLE_PAGING
           void setupPaging();
           void cleanupPaging();
+#endif
 
           /* Compression-related */
           bool compress();

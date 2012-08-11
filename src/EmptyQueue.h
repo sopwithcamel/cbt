@@ -4,9 +4,9 @@
 #include <stdint.h>
 #include <list>
 
-#include "CTNode.h"
+#include "Node.h"
 
-namespace compresstree {
+namespace cbt {
     class Node;
     struct NodeID {
         uint32_t operator()(const Node* node) const

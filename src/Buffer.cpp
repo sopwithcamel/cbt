@@ -1,7 +1,5 @@
-#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include "Buffer.h"
 #include "CompressTree.h"
@@ -9,7 +7,7 @@
 #include "rle.h"
 #include "snappy.h"
 
-namespace compresstree {
+namespace cbt {
     Buffer::List::List() :
             num_(0),
             c_hashlen_(0),
@@ -440,7 +438,6 @@ namespace compresstree {
 
     void Buffer::setupPaging()
     {
-#ifdef ENABLE_PAGING
         char* fileName = (char*)malloc(100);
         char* nodeNum = (char*)malloc(10);
         strcpy(fileName, "/localfs/hamur/minni_data/");
@@ -454,14 +451,11 @@ namespace compresstree {
         }
         free(fileName);
         free(nodeNum);
-#endif
     }
 
     void Buffer::cleanupPaging()
     {
-#ifdef ENABLE_PAGING
         fclose(f_);
-#endif
     }
 
     bool Buffer::checkPageOut()
@@ -536,6 +530,5 @@ namespace compresstree {
     {
         return pageAct_;
     }    
-
 #endif //ENABLE_PAGING
 }

@@ -6,10 +6,10 @@
 #include <vector>
 
 #include "CompressTree.h"
-#include "EmptyQueue.h"
 #include "Node.h"
+#include "EmptyQueue.h"
 
-namespace compresstree {
+namespace cbt {
     class CompressTree;
     class Node;
 
