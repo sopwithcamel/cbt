@@ -16,3 +16,4 @@
 
 # SCons temp files
 *.dblite
+*.os

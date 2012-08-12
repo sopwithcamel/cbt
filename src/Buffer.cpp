@@ -1,10 +1,11 @@
+#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include "Buffer.h"
 #include "CompressTree.h"
-#include "compsort.h"
-#include "rle.h"
+//#include "compsort.h"
+//#include "rle.h"
 #include "snappy.h"
 
 namespace cbt {
@@ -25,8 +26,8 @@ namespace cbt {
 
     void Buffer::List::allocate(bool isLarge)
     {
-        uint32_t nel = compresstree::MAX_ELS_PER_BUFFER;
-        uint32_t buf = compresstree::BUFFER_SIZE;
+        uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
+        uint32_t buf = cbt::BUFFER_SIZE;
         if (isLarge) {
             nel *= 2;
             buf *= 2;

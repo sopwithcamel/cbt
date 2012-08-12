@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <deque>
 #include <stdio.h>
+
+#define __STDC_LIMIT_MACROS /* for UINT32_MAX etc. */
 #include <stdint.h>
 #include <stdlib.h>
 
