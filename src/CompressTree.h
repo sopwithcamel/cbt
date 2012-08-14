@@ -52,6 +52,7 @@ namespace cbt {
 
         /* Insert record into tree */
         bool insert(void* hash, PartialAgg* agg);
+        bool bulk_insert(PartialAgg** paos, uint64_t num);
         /* read values */
         bool nextValue(void*& hash, PartialAgg*& agg);
       private:

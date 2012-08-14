@@ -8,6 +8,7 @@
 
 #include "Buffer.h"
 #include "CompressTree.h"
+#include "HashUtil.h"
 #include "Slaves.h"
 
 namespace cbt {
@@ -57,6 +58,17 @@ namespace cbt {
         pthread_cond_destroy(&rootNodeAvailableForWriting_);
         pthread_mutex_destroy(&rootNodeAvailableMutex_);
         pthread_barrier_destroy(&threadsBarrier_);
+    }
+
+    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num)
+    {
+        PartialAgg* pao;
+        for (int i=0; i<num; i++) {
+            pao = paos[i];
+            uint64_t hashv = HashUtil::MurmurHash(pao->key(), 42);
+            void* ptrToHash = (void*)&hashv;
+            insert(ptrToHash, pao);
+        }
     }
 
     bool CompressTree::insert(void* hash, PartialAgg* agg)
