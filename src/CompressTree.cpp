@@ -19,7 +19,7 @@ namespace cbt {
 
     CompressTree::CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
-                Operations* ops) :
+                const Operations* const ops) :
         a_(a),
         b_(b),
         nodeCtr(1),
