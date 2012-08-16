@@ -24,16 +24,16 @@ namespace cbt {
 #endif
 
         pthread_mutex_init(&queuedForEmptyMutex_, NULL);
-        tree_->createPAO_(NULL, (PartialAgg**)&lastPAO);
-        tree_->createPAO_(NULL, (PartialAgg**)&thisPAO);
+        tree_->ops->createPAO(NULL, (PartialAgg**)&lastPAO);
+        tree_->ops->createPAO(NULL, (PartialAgg**)&thisPAO);
     }
 
     Node::~Node()
     {
         pthread_mutex_destroy(&queuedForEmptyMutex_);
 
-        tree_->destroyPAO_(lastPAO);
-        tree_->destroyPAO_(thisPAO);
+        tree_->ops->destroyPAO(lastPAO);
+        tree_->ops->destroyPAO(thisPAO);
 
 #ifdef ENABLE_PAGING
         buffer_.cleanupPaging();
@@ -43,14 +43,14 @@ namespace cbt {
     bool Node::insert(uint64_t hash, PartialAgg* agg)
     {
         uint32_t hashv = (uint32_t)hash;
-        uint32_t buf_size = ((ProtobufPartialAgg*)agg)->serializedSize();
+        uint32_t buf_size = tree_->ops->getSerializedSize(agg);
 
         // copy into Buffer fields
         Buffer::List* l = buffer_.lists_[0];
         l->hashes_[l->num_] = hashv;
         l->sizes_[l->num_] = buf_size;
         memset(l->data_ + l->size_, 0, buf_size);
-        ((ProtobufPartialAgg*)agg)->serialize(l->data_ + l->size_,
+        tree_->ops->serialize(agg, l->data_ + l->size_,
                 buf_size);
         l->size_ += buf_size;
         l->num_++;
@@ -84,13 +84,12 @@ namespace cbt {
         } else {
             scheduleBufferCompressAction(Buffer::COMPRESS);
         }
+        return true;
     }
 
     bool Node::emptyBuffer()
     {
         uint32_t curChild = 0;
-        // offset till which elements have been written
-        uint32_t offset = 0;
         uint32_t curElement = 0;
         uint32_t lastElement = 0; 
 
@@ -329,18 +328,14 @@ namespace cbt {
         // quicksort elements
         quicksort(0, num - 1);
         checkIntegrity();
+        return true;
     }
 
     bool Node::aggregateSortedBuffer()
     {
-        uint32_t buf_size;
-
         // initialize auxiliary buffer
         Buffer aux;
         Buffer::List* a = aux.addList();
-
-        // exit condition
-        bool last_serialized = false;
 
         // aggregate elements in buffer
         uint32_t lastIndex = 0;
@@ -349,15 +344,15 @@ namespace cbt {
             if (l->hashes_[i] == l->hashes_[lastIndex]) {
                 // aggregate elements
                 if (i == lastIndex + 1) {
-                    if (!lastPAO->deserialize(perm_[lastIndex], 
-                            l->sizes_[lastIndex])) {
+                    if (!(tree_->ops->deserialize(lastPAO, perm_[lastIndex], 
+                            l->sizes_[lastIndex]))) {
                         fprintf(stderr, "Error at index %d\n", i);
                         assert(false);
                     }
                 }
-                assert(thisPAO->deserialize(perm_[i], l->sizes_[i]));
-                if (!thisPAO->key().compare(lastPAO->key())) {
-                    lastPAO->merge(thisPAO);
+                assert(tree_->ops->deserialize(thisPAO, perm_[i], l->sizes_[i]));
+                if (!thisPAO->key.compare(lastPAO->key)) {
+                    tree_->ops->merge(lastPAO->value, thisPAO->value);
 #ifdef ENABLE_COUNTERS
                     tree_->monitor_->numElements--;
                     tree_->monitor_->numMerged++;
@@ -377,8 +372,8 @@ namespace cbt {
                         l->sizes_[lastIndex]);
                 a->size_ += l->sizes_[lastIndex];
             } else {
-                uint32_t buf_size = lastPAO->serializedSize();
-                lastPAO->serialize(a->data_ + a->size_, buf_size);
+                uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
+                tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
 
                 a->sizes_[a->num_] = buf_size;
                 a->size_ += buf_size;
@@ -401,8 +396,8 @@ namespace cbt {
                     l->sizes_[lastIndex]);
             a->size_ += l->sizes_[lastIndex];
         } else {
-            uint32_t buf_size = lastPAO->serializedSize();
-            lastPAO->serialize(a->data_ + a->size_, buf_size);
+            uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
+            tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
 
             a->hashes_[a->num_] = l->hashes_[lastIndex];
             a->sizes_[a->num_] = buf_size;
@@ -441,12 +436,9 @@ namespace cbt {
         else
             a = aux.addList(/*large buffer=*/true);
 
-        // track number of PAOs that have been merged with lastPAO
-        uint32_t numMerged = 0;
-
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
-        for (int i=0; i<buffer_.lists_.size(); i++) {
+        for (uint32_t i=0; i<buffer_.lists_.size(); i++) {
             if (buffer_.lists_[i]->num_ > 0) {
                 Node::MergeElement* mge = new Node::MergeElement(
                         buffer_.lists_[i]);
@@ -514,20 +506,21 @@ namespace cbt {
         for (uint32_t i=1; i<num; i++) {
             if (l->hashes_[i] == l->hashes_[lastIndex]) {
                 if (numMerged == 0) {
-                    if (!lastPAO->deserialize(l->data_ + lastOffset,
-                            l->sizes_[lastIndex])) {
+                    if (!(tree_->ops->deserialize(lastPAO, l->data_ + lastOffset,
+                            l->sizes_[lastIndex]))) {
                         fprintf(stderr, "Can't deserialize at %u, index: %u\n",
                                 lastOffset, lastIndex);
                         assert(false);
                     }
                 }
-                if (!thisPAO->deserialize(l->data_ + offset, l->sizes_[i])) {
+                if (!(tree_->ops->deserialize(thisPAO, l->data_ + offset,
+                        l->sizes_[i]))) {
                     fprintf(stderr, "Can't deserialize at %u, index: %u\n",
                             offset, i);
                     assert(false);
                 }
-                if (!thisPAO->key().compare(lastPAO->key())) {
-                    lastPAO->merge(thisPAO);
+                if (!thisPAO->key.compare(lastPAO->key)) {
+                    tree_->ops->merge(lastPAO->value, thisPAO->value);
 #ifdef ENABLE_COUNTERS
                     tree_->monitor_->numElements--;
                     tree_->monitor_->numMerged++;
@@ -546,8 +539,8 @@ namespace cbt {
                         (void*)(l->data_ + lastOffset), l->sizes_[lastIndex]);
                 a->size_ += buf_size;
             } else {
-                uint32_t buf_size = lastPAO->serializedSize();
-                lastPAO->serialize(a->data_ + a->size_, buf_size);
+                uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
+                tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
                 a->sizes_[a->num_] = buf_size;
                 a->size_ += buf_size;
             }
@@ -567,8 +560,8 @@ namespace cbt {
                     (void*)(l->data_ + lastOffset), l->sizes_[lastIndex]);
             a->size_ += buf_size;
         } else {
-            uint32_t buf_size = lastPAO->serializedSize();
-            lastPAO->serialize(a->data_ + a->size_, buf_size);
+            uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
+            tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
             a->sizes_[a->num_] = buf_size;
             a->size_ += buf_size;
         }
@@ -912,6 +905,7 @@ namespace cbt {
         }
         tree_->destroyPAO_(pao);
 #endif
+        return true;
     }
 
     bool Node::checkIntegrity()

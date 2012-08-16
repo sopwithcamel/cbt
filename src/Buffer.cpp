@@ -11,11 +11,11 @@
 namespace cbt {
     Buffer::List::List() :
             num_(0),
+            size_(0),
+            state_(DECOMPRESSED),
             c_hashlen_(0),
             c_sizelen_(0),
-            c_datalen_(0),
-            size_(0),
-            state_(DECOMPRESSED)
+            c_datalen_(0)
     {
     }
 
@@ -467,6 +467,10 @@ namespace cbt {
             if (pageAct_ == PAGE_IN) {
                 /* Shouldn't happen */
                 assert(false);
+                return false;
+            } else { // we're paging out twice
+                assert(false);
+                return false;
             }
         } else {
             queuedForPaging_ = true;

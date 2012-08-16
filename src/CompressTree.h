@@ -46,8 +46,7 @@ namespace cbt {
       public:
         CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
-                size_t (*createPAOFunc)(Token* t, PartialAgg** p),
-                void (*destroyPAOFunc)(PartialAgg* p));
+                Operations* ops);
         ~CompressTree();
 
         /* Insert record into tree */
@@ -70,8 +69,7 @@ namespace cbt {
         const uint32_t a_;
         const uint32_t b_;
         uint32_t nodeCtr;
-        size_t (*createPAO_)(Token* t, PartialAgg** p);
-        void (*destroyPAO_)(PartialAgg* p);
+        Operations* ops;
         CompressAlgorithm alg_;
         Node* rootNode_;
         Node* inputNode_;

@@ -146,7 +146,7 @@ namespace cbt {
             depNodes.push_back(node);
             while (!depNodes.empty()) {
                 Node* t = depNodes.front();
-                for (int i=0; i<t->children_.size(); i++) {
+                for (uint32_t i=0; i<t->children_.size(); i++) {
                     if (t->children_[i]->queuedForEmptying_) {
                         queue_.insert(t->children_[i], ++prio); 
                         depNodes.push_back(t->children_[i]);
@@ -257,7 +257,6 @@ namespace cbt {
 
     void* Sorter::work()
     {
-        bool rootFlag = false;
         pthread_mutex_lock(&queueMutex_);
         pthread_barrier_wait(&tree_->threadsBarrier_);
         while (nodes_.empty() && !inputComplete_) {

@@ -19,13 +19,11 @@ namespace cbt {
 
     CompressTree::CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
-                size_t (*createPAOFunc)(Token* t, PartialAgg** p),
-                void (*destroyPAOFunc)(PartialAgg* p)) :
+                Operations* ops) :
         a_(a),
         b_(b),
         nodeCtr(1),
-        createPAO_(createPAOFunc),
-        destroyPAO_(destroyPAOFunc),
+        ops(ops),
         alg_(SNAPPY),
         allFlush_(true),
         lastLeafRead_(0),
@@ -63,12 +61,14 @@ namespace cbt {
     bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num)
     {
         PartialAgg* pao;
-        for (int i=0; i<num; i++) {
+        bool ret = true;
+        for (uint64_t i=0; i<num; i++) {
             pao = paos[i];
-            uint64_t hashv = HashUtil::MurmurHash(pao->key(), 42);
+            uint64_t hashv = HashUtil::MurmurHash(pao->key, 42);
             void* ptrToHash = (void*)&hashv;
-            insert(ptrToHash, pao);
+            ret &= insert(ptrToHash, pao);
         }
+        return ret;
     }
 
     bool CompressTree::insert(void* hash, PartialAgg* agg)
@@ -147,9 +147,9 @@ namespace cbt {
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->buffer_.lists_[0];
         hash = (void*)&l->hashes_[lastElement_];
-        createPAO_(NULL, &agg);
-        if (!((ProtobufPartialAgg*)agg)->deserialize(l->data_ + lastOffset_,
-                l->sizes_[lastElement_])) {
+        ops->createPAO(NULL, &agg);
+        if (!(ops->deserialize(agg, l->data_ + lastOffset_,
+                l->sizes_[lastElement_]))) {
             fprintf(stderr, "Can't deserialize at %u, index: %u\n", lastOffset_,
                     lastElement_);
             assert(false);

@@ -6,34 +6,49 @@
 #include <stdio.h>
 #include <string.h>
 
-#define REGISTER_PAO(x) extern "C"\
-	size_t __libminni_pao_create(Token* tok, PartialAgg** p_list)\
-	{\
-		return x::create(tok, p_list);\
-	}\
-	extern "C" void __libminni_pao_destroy(x* pao)\
-	{\
-		delete pao;\
-	}
+#define REGISTER(x) \
+        Operations* __libminni_operations = new x();
 
 class Token;
+class Value {
+};
+
 class PartialAgg {
+  protected:
+    /* don't allow PartialAgg objects to be created */
+	PartialAgg() {}
+    ~PartialAgg() {}
+  public:
+    std::string key;
+    Value* value;
+};
+
+class Operations {
+  public:
+    static uint64_t createCtr;
+    static uint64_t destCtr;
   public:
     enum SerializationMethod {
         PROTOBUF,
         BOOST,
         HAND
     };
-    static uint64_t createCtr;
-    static uint64_t destCtr;
-  public:
-	PartialAgg() {}
-	virtual ~PartialAgg() {}
-    /* Get key */
-    virtual const std::string& key() const = 0;
-	virtual void merge(PartialAgg* add_agg) = 0;
-	static size_t create(Token*& t, PartialAgg** p_list) { return 0; }
+    virtual ~Operations() = 0;
+    virtual size_t createPAO(Token* t, PartialAgg** p_list) const = 0;
+    virtual bool destroyPAO(PartialAgg* p) const = 0;
+	virtual void merge(Value* v, Value* merge) const = 0;
     virtual SerializationMethod getSerializationMethod() const = 0;
+    virtual uint32_t getSerializedSize(PartialAgg* p) const = 0;
+	/* serialize into string/buffer */
+	virtual void serialize(PartialAgg* p,
+            std::string* output) const = 0;
+	virtual void serialize(PartialAgg* p,
+            char* output, size_t size) = 0;
+	/* deserialize from string/buffer */
+	virtual bool deserialize(PartialAgg* p,
+            const std::string& input) = 0;
+	virtual bool deserialize(PartialAgg* p,
+            const char* input, size_t size) = 0;
 };
 
 #endif

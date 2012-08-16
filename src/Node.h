@@ -8,7 +8,7 @@
 #include "Buffer.h"
 #include "CompressTree.h"
 #include "Config.h"
-#include "ProtobufPartialAgg.h"
+#include "PartialAgg.h"
 
 #define CALL_MEM_FUNC(object,ptrToMember) ((object).*(ptrToMember))
 
@@ -158,7 +158,7 @@ namespace cbt {
         /* level in the tree; 0 at leaves and increases upwards */
         uint32_t level_;
         Node* parent_;
-        ProtobufPartialAgg *lastPAO, *thisPAO;
+        PartialAgg *lastPAO, *thisPAO;
 
         /* Pointers to children */
         std::vector<Node*> children_;

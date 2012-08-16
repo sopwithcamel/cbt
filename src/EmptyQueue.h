@@ -34,7 +34,7 @@ namespace cbt {
         Node* pop()
         {
             PQ::iterator it = nodeList_.begin();
-            int32_t maxPrio = it->second;
+            uint32_t maxPrio = it->second;
             PQ::iterator maxNode = it;
             it++;
             for (; it != nodeList_.end(); it++) {
