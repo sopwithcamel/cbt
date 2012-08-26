@@ -351,8 +351,8 @@ namespace cbt {
                     }
                 }
                 assert(tree_->ops->deserialize(thisPAO, perm_[i], l->sizes_[i]));
-                if (!thisPAO->key.compare(lastPAO->key)) {
-                    tree_->ops->merge(lastPAO->value, thisPAO->value);
+                if (tree_->ops->sameKey(thisPAO, lastPAO)) {
+                    tree_->ops->merge(lastPAO, thisPAO);
 #ifdef ENABLE_COUNTERS
                     tree_->monitor_->numElements--;
                     tree_->monitor_->numMerged++;
@@ -519,8 +519,8 @@ namespace cbt {
                             offset, i);
                     assert(false);
                 }
-                if (!thisPAO->key.compare(lastPAO->key)) {
-                    tree_->ops->merge(lastPAO->value, thisPAO->value);
+                if (tree_->ops->sameKey(thisPAO, lastPAO)) {
+                    tree_->ops->merge(lastPAO, thisPAO);
 #ifdef ENABLE_COUNTERS
                     tree_->monitor_->numElements--;
                     tree_->monitor_->numMerged++;
