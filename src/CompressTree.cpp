@@ -64,7 +64,8 @@ namespace cbt {
         bool ret = true;
         for (uint64_t i=0; i<num; i++) {
             pao = paos[i];
-            uint64_t hashv = HashUtil::MurmurHash(ops->getKey(pao), 42);
+            const char* key = ops->getKey(pao);
+            uint64_t hashv = HashUtil::MurmurHash(key, strlen(key), 42);
             void* ptrToHash = (void*)&hashv;
             ret &= insert(ptrToHash, pao);
         }
