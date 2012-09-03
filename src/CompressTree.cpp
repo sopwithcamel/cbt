@@ -112,6 +112,20 @@ namespace cbt {
         return ret;
     }
 
+    bool CompressTree::bulk_read(PartialAgg**& pao_list, uint64_t& num_read,
+            uint64_t max)
+    {
+        uint64_t hash;
+        void* ptrToHash = (void*)&hash;
+        num_read = 0;
+        while(num_read < max) {
+            if (!(nextValue(ptrToHash, pao_list[num_read])))
+                return false;
+            num_read++;
+        }
+        return true;
+    }
+
     bool CompressTree::nextValue(void*& hash, PartialAgg*& agg)
     {
         if (!allFlush_) {
