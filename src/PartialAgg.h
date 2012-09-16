@@ -37,6 +37,7 @@ class Operations {
     virtual bool setKey(PartialAgg* p, char* k) const = 0;
     virtual bool sameKey(PartialAgg* p1, PartialAgg* p2) const = 0;
     virtual size_t createPAO(Token* t, PartialAgg** p_list) const = 0;
+    virtual size_t dividePAO(const PartialAgg& p, PartialAgg** p_list) const = 0;
     virtual bool destroyPAO(PartialAgg* p) const = 0;
 	virtual bool merge(PartialAgg* v, PartialAgg* merge) const = 0;
     virtual SerializationMethod getSerializationMethod() const = 0;
