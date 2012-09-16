@@ -146,6 +146,9 @@ namespace cbt {
 #endif
 */
             flushBuffers();
+            lastLeafRead_ = 0;
+            lastOffset_ = 0;
+            lastElement_ = 0;
 
             /* Wait for all outstanding compression work to finish */
             compressor_->waitUntilCompletionNoticeReceived();
@@ -163,6 +166,8 @@ namespace cbt {
         Buffer::List* l = curLeaf->buffer_.lists_[0];
         hash = (void*)&l->hashes_[lastElement_];
         ops->createPAO(NULL, &agg);
+//        if (lastLeafRead_ == 0)
+//            fprintf(stderr, "%ld\n", lastOffset_);
         if (!(ops->deserialize(agg, l->data_ + lastOffset_,
                 l->sizes_[lastElement_]))) {
             fprintf(stderr, "Can't deserialize at %u, index: %u\n", lastOffset_,
@@ -285,13 +290,18 @@ namespace cbt {
                 visitQueue.push_back(curNode->children_[i]);
             }
         }
-#ifdef CT_NODE_DEBUG
         fprintf(stderr, "Tree has %ld leaves\n", allLeaves_.size());
+        uint32_t depth = 1;
+        curNode = rootNode_;
+        while (curNode->children_.size() > 0) {
+            depth++;
+            curNode = curNode->children_[0];
+        }
+        fprintf(stderr, "Tree has depth: %d\n", depth);
         uint32_t numit = 0;
         for (int i=0; i<allLeaves_.size(); i++)
             numit += allLeaves_[i]->buffer_.numElements();
         fprintf(stderr, "Tree has %ld elements\n", numit);
-#endif
         return true;
     }
 
