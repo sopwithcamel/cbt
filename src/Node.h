@@ -75,7 +75,7 @@ namespace cbt {
         ~Node();
         /* copy user data into buffer. Buffer should be decompressed
            before calling. */
-        bool insert(uint64_t hash, PartialAgg* agg);
+        bool insert(PartialAgg* agg);
 
         // identification functions
         bool isLeaf() const;

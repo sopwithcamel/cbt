@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "CompressTree.h"
+#include "HashUtil.h"
 #include "Node.h"
 #include "Slaves.h"
 
@@ -40,16 +41,17 @@ namespace cbt {
 #endif
     }
 
-    bool Node::insert(uint64_t hash, PartialAgg* agg)
+    bool Node::insert(PartialAgg* agg)
     {
-        uint32_t hashv = (uint32_t)hash;
         uint32_t buf_size = tree_->ops->getSerializedSize(agg);
+        const char* key = tree_->ops->getKey(agg);
 
         // copy into Buffer fields
         Buffer::List* l = buffer_.lists_[0];
-        l->hashes_[l->num_] = hashv;
+        l->hashes_[l->num_] = HashUtil::MurmurHash(key, strlen(key), 42);
         l->sizes_[l->num_] = buf_size;
-        memset(l->data_ + l->size_, 0, buf_size);
+        // is this required?
+//        memset(l->data_ + l->size_, 0, buf_size);
         tree_->ops->serialize(agg, l->data_ + l->size_,
                 buf_size);
         l->size_ += buf_size;
@@ -57,7 +59,6 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
         tree_->monitor_->numElements++;
 #endif
-
         return true;
     }
 
@@ -366,7 +367,7 @@ namespace cbt {
             if (i == lastIndex + 1) {
                 // the size wouldn't have changed
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
-                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+//                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
                 memmove(a->data_ + a->size_,
                         (void*)(perm_[lastIndex]),
                         l->sizes_[lastIndex]);
@@ -390,7 +391,7 @@ namespace cbt {
             a->hashes_[a->num_] = l->hashes_[lastIndex];
             // the size wouldn't have changed
             a->sizes_[a->num_] = l->sizes_[lastIndex];
-            memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+            //memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
             memmove(a->data_ + a->size_,
                     (void*)(perm_[lastIndex]),
                     l->sizes_[lastIndex]);
@@ -454,7 +455,7 @@ namespace cbt {
             a->hashes_[a->num_] = n.hash();
             uint32_t buf_size = n.size();
             a->sizes_[a->num_] = buf_size;
-            memset(a->data_ + a->size_, 0, buf_size);
+            //memset(a->data_ + a->size_, 0, buf_size);
             memmove(a->data_ + a->size_,
                     (void*)n.data(), buf_size);
             a->size_ += buf_size;
@@ -534,7 +535,7 @@ namespace cbt {
             if (numMerged == 0) {
                 uint32_t buf_size = l->sizes_[lastIndex];
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
-                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                //memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
                 memmove(a->data_ + a->size_,
                         (void*)(l->data_ + lastOffset), l->sizes_[lastIndex]);
                 a->size_ += buf_size;
@@ -555,7 +556,7 @@ namespace cbt {
         if (numMerged == 0) {
             uint32_t buf_size = l->sizes_[lastIndex];
             a->sizes_[a->num_] = l->sizes_[lastIndex];
-            memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+            //memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
             memmove(a->data_ + a->size_,
                     (void*)(l->data_ + lastOffset), l->sizes_[lastIndex]);
             a->size_ += buf_size;
@@ -664,13 +665,13 @@ namespace cbt {
 #endif
         // allocate a new List in the buffer and copy data into it
         Buffer::List* l = buffer_.addList();
-        memset(l->hashes_, 0, num * sizeof(uint32_t));
+        //memset(l->hashes_, 0, num * sizeof(uint32_t));
         memmove(l->hashes_, parent_list->hashes_ + index,
                 num * sizeof(uint32_t));
-        memset(l->sizes_, 0, num * sizeof(uint32_t));
+        //memset(l->sizes_, 0, num * sizeof(uint32_t));
         memmove(l->sizes_, parent_list->sizes_ + index,
                 num * sizeof(uint32_t));
-        memset(l->data_, 0, num_bytes);
+        //memset(l->data_, 0, num_bytes);
         memmove(l->data_, parent_list->data_ + offset, 
                 num_bytes);
         l->num_ = num;

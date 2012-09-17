@@ -8,7 +8,6 @@
 
 #include "Buffer.h"
 #include "CompressTree.h"
-#include "HashUtil.h"
 #include "Slaves.h"
 
 namespace cbt {
@@ -58,23 +57,15 @@ namespace cbt {
         pthread_barrier_destroy(&threadsBarrier_);
     }
 
-    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num, bool destroy)
+    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num)
     {
-        PartialAgg* pao;
         bool ret = true;
-        for (uint64_t i=0; i<num; i++) {
-            pao = paos[i];
-            const char* key = ops->getKey(pao);
-            uint64_t hashv = HashUtil::MurmurHash(key, strlen(key), 42);
-            void* ptrToHash = (void*)&hashv;
-            ret &= insert(ptrToHash, pao);
-            if (destroy)
-                ops->destroyPAO(pao);
-        }
+        for (uint64_t i=0; i<num; i++)
+            ret &= insert(paos[i]);
         return ret;
     }
 
-    bool CompressTree::insert(void* hash, PartialAgg* agg)
+    bool CompressTree::insert(PartialAgg* agg)
     {
         // copy buf into root node buffer
         // root node buffer always decompressed
@@ -110,7 +101,7 @@ namespace cbt {
             sorter_->addNode(rootNode_);
             sorter_->wakeup();
         }
-        bool ret = inputNode_->insert(*(uint64_t*)hash, agg);
+        bool ret = inputNode_->insert(agg);
         return ret;
     }
 
@@ -300,8 +291,8 @@ namespace cbt {
             curNode = curNode->children_[0];
         }
         fprintf(stderr, "Tree has depth: %d\n", depth);
-        uint32_t numit = 0;
-        for (int i=0; i<allLeaves_.size(); i++)
+        uint64_t numit = 0;
+        for (uint64_t i=0; i<allLeaves_.size(); i++)
             numit += allLeaves_[i]->buffer_.numElements();
         fprintf(stderr, "Tree has %ld elements\n", numit);
         return true;
