@@ -58,7 +58,7 @@ namespace cbt {
         pthread_barrier_destroy(&threadsBarrier_);
     }
 
-    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num)
+    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num, bool destroy)
     {
         PartialAgg* pao;
         bool ret = true;
@@ -68,6 +68,8 @@ namespace cbt {
             uint64_t hashv = HashUtil::MurmurHash(key, strlen(key), 42);
             void* ptrToHash = (void*)&hashv;
             ret &= insert(ptrToHash, pao);
+            if (destroy)
+                ops->destroyPAO(pao);
         }
         return ret;
     }
