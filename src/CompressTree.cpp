@@ -8,7 +8,6 @@
 
 #include "Buffer.h"
 #include "CompressTree.h"
-#include "HashUtil.h"
 #include "Slaves.h"
 
 namespace cbt {
@@ -60,18 +59,13 @@ namespace cbt {
 
     bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num)
     {
-        PartialAgg* pao;
         bool ret = true;
-        for (uint64_t i=0; i<num; i++) {
-            pao = paos[i];
-            uint64_t hashv = HashUtil::MurmurHash(pao->key, 42);
-            void* ptrToHash = (void*)&hashv;
-            ret &= insert(ptrToHash, pao);
-        }
+        for (uint64_t i=0; i<num; i++)
+            ret &= insert(paos[i]);
         return ret;
     }
 
-    bool CompressTree::insert(void* hash, PartialAgg* agg)
+    bool CompressTree::insert(PartialAgg* agg)
     {
         // copy buf into root node buffer
         // root node buffer always decompressed
@@ -107,8 +101,22 @@ namespace cbt {
             sorter_->addNode(rootNode_);
             sorter_->wakeup();
         }
-        bool ret = inputNode_->insert(*(uint64_t*)hash, agg);
+        bool ret = inputNode_->insert(agg);
         return ret;
+    }
+
+    bool CompressTree::bulk_read(PartialAgg**& pao_list, uint64_t& num_read,
+            uint64_t max)
+    {
+        uint64_t hash;
+        void* ptrToHash = (void*)&hash;
+        num_read = 0;
+        while(num_read < max) {
+            if (!(nextValue(ptrToHash, pao_list[num_read])))
+                return false;
+            num_read++;
+        }
+        return true;
     }
 
     bool CompressTree::nextValue(void*& hash, PartialAgg*& agg)
@@ -131,6 +139,9 @@ namespace cbt {
 #endif
 */
             flushBuffers();
+            lastLeafRead_ = 0;
+            lastOffset_ = 0;
+            lastElement_ = 0;
 
             /* Wait for all outstanding compression work to finish */
             compressor_->waitUntilCompletionNoticeReceived();
@@ -148,6 +159,8 @@ namespace cbt {
         Buffer::List* l = curLeaf->buffer_.lists_[0];
         hash = (void*)&l->hashes_[lastElement_];
         ops->createPAO(NULL, &agg);
+//        if (lastLeafRead_ == 0)
+//            fprintf(stderr, "%ld\n", lastOffset_);
         if (!(ops->deserialize(agg, l->data_ + lastOffset_,
                 l->sizes_[lastElement_]))) {
             fprintf(stderr, "Can't deserialize at %u, index: %u\n", lastOffset_,
@@ -270,13 +283,18 @@ namespace cbt {
                 visitQueue.push_back(curNode->children_[i]);
             }
         }
-#ifdef CT_NODE_DEBUG
         fprintf(stderr, "Tree has %ld leaves\n", allLeaves_.size());
-        uint32_t numit = 0;
-        for (int i=0; i<allLeaves_.size(); i++)
+        uint32_t depth = 1;
+        curNode = rootNode_;
+        while (curNode->children_.size() > 0) {
+            depth++;
+            curNode = curNode->children_[0];
+        }
+        fprintf(stderr, "Tree has depth: %d\n", depth);
+        uint64_t numit = 0;
+        for (uint64_t i=0; i<allLeaves_.size(); i++)
             numit += allLeaves_[i]->buffer_.numElements();
         fprintf(stderr, "Tree has %ld elements\n", numit);
-#endif
         return true;
     }
 

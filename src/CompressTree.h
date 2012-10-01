@@ -50,9 +50,11 @@ namespace cbt {
         ~CompressTree();
 
         /* Insert record into tree */
-        bool insert(void* hash, PartialAgg* agg);
+        bool insert(PartialAgg* agg);
         bool bulk_insert(PartialAgg** paos, uint64_t num);
         /* read values */
+        // returns true if there are more values to be read and false otherwise
+        bool bulk_read(PartialAgg**& pao_list, uint64_t& num_read, uint64_t max);
         bool nextValue(void*& hash, PartialAgg*& agg);
       private:
         bool addLeafToEmpty(Node* node);
