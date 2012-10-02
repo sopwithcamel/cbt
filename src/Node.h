@@ -1,6 +1,28 @@
-#ifndef LIB_COMPRESS_NODE_H
-#define LIB_COMPRESS_NODE_H
-#include <iostream>
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+// ---
+// Author: Hrishikesh Amur
+
+#ifndef SRC_NODE_H_
+#define SRC_NODE_H_
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -9,8 +31,6 @@
 #include "CompressTree.h"
 #include "Config.h"
 #include "PartialAgg.h"
-
-#define CALL_MEM_FUNC(object,ptrToMember) ((object).*(ptrToMember))
 
 namespace cbt {
 
@@ -30,32 +50,27 @@ namespace cbt {
 
         class MergeElement {
           public:
-            MergeElement(Buffer::List* l)
-            {
+            explicit MergeElement(Buffer::List* l) {
                 ind = off = 0;
                 list = l;
             }
-            uint32_t hash()
-            {
+            uint32_t hash() {
                 return list->hashes_[ind];
             }
-            uint32_t size()
-            {
+            uint32_t size() {
                 return list->sizes_[ind];
             }
-            char* data()
-            {
+            char* data() {
                 return list->data_ + off;
             }
-            bool next()
-            {
+            bool next() {
                 if (ind >= list->num_-1) {
                     return false;
                 }
                 off += list->sizes_[ind];
                 ind++;
                 return true;
-            }                
+            }
             uint32_t ind;           // index of hash being compared
             uint32_t off;           // offset of serialized PAO
             Buffer::List* list;     // list containing element
@@ -64,14 +79,14 @@ namespace cbt {
         class MergeComparator {
           public:
             bool operator()(const MergeElement& lhs,
-                    const MergeElement& rhs) const
-            {
+                    const MergeElement& rhs) const {
                 return (lhs.list->hashes_[lhs.ind] >
                         rhs.list->hashes_[rhs.ind]);
-            } 
+            }
         };
+
       public:
-        Node(CompressTree* tree, uint32_t level);
+        explicit Node(CompressTree* tree, uint32_t level);
         ~Node();
         /* copy user data into buffer. Buffer should be decompressed
            before calling. */
@@ -84,14 +99,15 @@ namespace cbt {
         bool isFull() const;
         uint32_t level() const;
         uint32_t id() const;
+
       private:
         /* Buffer handling functions */
 
         bool emptyOrCompress();
-        /* Function: empty the buffer into the buffers in the next level. 
+        /* Function: empty the buffer into the buffers in the next level.
          *  + Must be called with buffer decompressed.
          *  + Buffer will be freed after invocation.
-         *  + If children buffers overflow, it recursively calls itself. 
+         *  + If children buffers overflow, it recursively calls itself.
          *    until the recursion reaches the leaves. At this stage, handling
          *    the leaf buffer overflows is queued for later because this may
          *    cause splitting (recursively) up the tree which is best done
@@ -117,8 +133,8 @@ namespace cbt {
 
         /* split leaf node and return new leaf */
         Node* splitLeaf();
-        /* Add a new child to the node; the child type indicates which side 
-         * of the separator the child must be inserted. 
+        /* Add a new child to the node; the child type indicates which side
+         * of the separator the child must be inserted.
          * if the number of children is more than the allowed number:
          * + first check if siblings have fewer children
          * + if not, split the node into two and call addChild recursively
@@ -146,9 +162,8 @@ namespace cbt {
         void waitForPageAction(const Buffer::PageAction& act);
         bool performPageAction();
         Buffer::PageAction getPageAction();
-#endif // ENABLE_PAGING
+#endif  // ENABLE_PAGING
 
-      private:
         /* pointer to the tree */
         CompressTree* tree_;
         /* Buffer */
@@ -171,4 +186,4 @@ namespace cbt {
     };
 }
 
-#endif
+#endif  // SRC_NODE_H_
