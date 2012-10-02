@@ -1,0 +1,8 @@
+package test;
+
+option optimize_for = SPEED;
+
+message pao {
+    required string key = 1;
+    required uint32 count = 2;
+}

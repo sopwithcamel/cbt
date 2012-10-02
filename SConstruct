@@ -27,8 +27,12 @@ src_files = Glob('src/*.cpp')
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
 
-env.Append(CCFLAGS = ['-g','-O2','-Wall'])
+env.Append(CCFLAGS = ['-g','-O2','-Wall'],
+            CPPFLAGS = ['-Isrc/'])
 cbtlib = env.SharedLibrary('cbt', src_files)
+
+test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
+testapp = env.Program('test/testcbt', test_files)
 
 ## Targets
 # build targets
@@ -43,3 +47,6 @@ env.Alias('install', ['install-lib', 'install-headers'])
 # audit
 Utility("cppcheck", [], "cppcheck --template gcc --enable=all --force src/")
 audit = env.Alias('audit', ['cppcheck'])
+
+# test
+test = env.Alias('test', [testapp])
