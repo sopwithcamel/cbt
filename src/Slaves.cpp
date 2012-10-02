@@ -1,7 +1,30 @@
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+// ---
+// Author: Hrishikesh Amur
+
 #include <assert.h>
-#include <deque>
 #include <pthread.h>
 #include <stdint.h>
+#include <deque>
 #include "Slaves.h"
 
 namespace cbt {
@@ -9,31 +32,26 @@ namespace cbt {
             tree_(tree),
             inputComplete_(false),
             queueEmpty_(true),
-            askForCompletionNotice_(false)
-    {
+            askForCompletionNotice_(false) {
         pthread_mutex_init(&queueMutex_, NULL);
         pthread_cond_init(&queueHasWork_, NULL);
 
         pthread_mutex_init(&completionMutex_, NULL);
         pthread_cond_init(&complete_, NULL);
-
     }
 
-    bool Slave::empty() const
-    {
+    bool Slave::empty() const {
         return queueEmpty_;
     }
 
-    bool Slave::wakeup()
-    {
+    bool Slave::wakeup() {
         pthread_mutex_lock(&queueMutex_);
         pthread_cond_signal(&queueHasWork_);
         pthread_mutex_unlock(&queueMutex_);
         return true;
     }
 
-    void Slave::sendCompletionNotice()
-    {
+    void Slave::sendCompletionNotice() {
         pthread_mutex_lock(&completionMutex_);
         if (askForCompletionNotice_) {
             pthread_cond_signal(&complete_);
@@ -41,9 +59,8 @@ namespace cbt {
         }
         pthread_mutex_unlock(&completionMutex_);
     }
-    
-    void Slave::waitUntilCompletionNoticeReceived()
-    {
+
+    void Slave::waitUntilCompletionNoticeReceived() {
         pthread_mutex_lock(&queueMutex_);
         if (!empty()) {
             pthread_mutex_lock(&completionMutex_);
@@ -57,28 +74,25 @@ namespace cbt {
         }
     }
 
-    void* Slave::callHelper(void* context)
-    {
-        return ((Slave*)context)->work();
+    void* Slave::callHelper(void* context) {
+        return static_cast<Slave*>(context)->work();
     }
 
-    void Slave::printElements() const
-    {
-        for (uint32_t i=0; i<nodes_.size(); i++) {
+    void Slave::printElements() const {
+        for (uint32_t i = 0; i < nodes_.size(); ++i) {
             fprintf(stderr, "%d, ", nodes_[i]->id());
         }
         fprintf(stderr, "\n");
     }
 
-    void Slave::startThreads()
-    {
+    void Slave::startThreads() {
         pthread_attr_t attr;
         pthread_attr_init(&attr);
-        pthread_create(&thread_, &attr, callHelper, (void*)this);
+        pthread_create(&thread_, &attr, callHelper,
+                reinterpret_cast<void*>(this));
     }
 
-    void Slave::stopThreads()
-    {
+    void Slave::stopThreads() {
         void* status;
         setInputComplete(true);
         wakeup();
@@ -86,16 +100,13 @@ namespace cbt {
     }
 
     Emptier::Emptier(CompressTree* tree) :
-            Slave(tree)
-    {
+            Slave(tree) {
     }
 
-    Emptier::~Emptier()
-    {
+    Emptier::~Emptier() {
     }
 
-    void* Emptier::work()
-    {
+    void* Emptier::work() {
         bool rootFlag = false;
         pthread_mutex_lock(&queueMutex_);
         pthread_barrier_wait(&tree_->threadsBarrier_);
@@ -119,13 +130,14 @@ namespace cbt {
                 if (n->isRoot())
                     rootFlag = true;
 #ifdef CT_NODE_DEBUG
-                fprintf(stderr, "emptier: emptying node: %d (size: %u)\t", n->id_, n->buffer_.numElements());
+                fprintf(stderr, "emptier: emptying node: %d (size: %u)\t",
+                        n->id_, n->buffer_.numElements());
                 fprintf(stderr, "remaining: ");
                 queue_.printElements();
 #endif
-                if (n->isRoot())
+                if (n->isRoot()) {
                     n->aggregateSortedBuffer();
-                else {
+                } else {
                     n->aggregateMergedBuffer();
                 }
                 n->emptyBuffer();
@@ -149,8 +161,7 @@ namespace cbt {
         pthread_exit(NULL);
     }
 
-    void Emptier::addNode(Node* node)
-    {
+    void Emptier::addNode(Node* node) {
         pthread_mutex_lock(&queueMutex_);
         if (node) {
             queue_.insert(node, node->level());
@@ -161,9 +172,9 @@ namespace cbt {
             depNodes.push_back(node);
             while (!depNodes.empty()) {
                 Node* t = depNodes.front();
-                for (uint32_t i=0; i<t->children_.size(); i++) {
+                for (uint32_t i = 0; i < t->children_.size(); i++) {
                     if (t->children_[i]->queuedForEmptying_) {
-                        queue_.insert(t->children_[i], ++prio); 
+                        queue_.insert(t->children_[i], ++prio);
                         depNodes.push_back(t->children_[i]);
                     }
                 }
@@ -172,22 +183,20 @@ namespace cbt {
         }
         pthread_mutex_unlock(&queueMutex_);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d (size: %u) added to to-empty list: ", node->id_, node->buffer_.numElements());
+        fprintf(stderr, "Node %d (size: %u) added to to-empty list: ",
+                node->id_, node->buffer_.numElements());
         queue_.printElements();
 #endif
     }
 
     Compressor::Compressor(CompressTree* tree) :
-            Slave(tree)
-    {
+            Slave(tree) {
     }
 
-    Compressor::~Compressor()
-    {
+    Compressor::~Compressor() {
     }
 
-    void* Compressor::work()
-    {
+    void* Compressor::work() {
         pthread_mutex_lock(&queueMutex_);
         pthread_barrier_wait(&tree_->threadsBarrier_);
         while (nodes_.empty() && !inputComplete_) {
@@ -216,8 +225,7 @@ namespace cbt {
         pthread_exit(NULL);
     }
 
-    void Compressor::addNode(Node* node)
-    {
+    void Compressor::addNode(Node* node) {
         Buffer::CompressionAction act = node->getCompressAction();
         if (act == Buffer::COMPRESS) {
             pthread_mutex_lock(&queueMutex_);
@@ -243,7 +251,8 @@ namespace cbt {
             pthread_mutex_lock(&queueMutex_);
             nodes_.push_front(node);
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "adding node %d (size: %u) to decompress: ", node->id_, node->buffer_.numElements());
+            fprintf(stderr, "adding node %d (size: %u) to decompress: ",
+                    node->id_, node->buffer_.numElements());
             printElements();
 #endif
         }
@@ -252,16 +261,13 @@ namespace cbt {
     }
 
     Sorter::Sorter(CompressTree* tree) :
-            Slave(tree)
-    {
+            Slave(tree) {
     }
 
-    Sorter::~Sorter()
-    {
+    Sorter::~Sorter() {
     }
 
-    void* Sorter::work()
-    {
+    void* Sorter::work() {
         pthread_mutex_lock(&queueMutex_);
         pthread_barrier_wait(&tree_->threadsBarrier_);
         while (nodes_.empty() && !inputComplete_) {
@@ -279,15 +285,16 @@ namespace cbt {
                 pthread_mutex_unlock(&queueMutex_);
                 n->waitForCompressAction(Buffer::DECOMPRESS);
 #ifdef CT_NODE_DEBUG
-                fprintf(stderr, "sorter: sorting node: %d (size: %u)\t", n->id_, n->buffer_.numElements());
+                fprintf(stderr, "sorter: sorting node: %d (size: %u)\t",
+                        n->id_, n->buffer_.numElements());
                 fprintf(stderr, "remaining: ");
-                for (int i=0; i<nodes_.size(); i++)
+                for (int i = 0; i < nodes_.size(); ++i)
                     fprintf(stderr, "%d, ", nodes_[i]->id_);
                 fprintf(stderr, "\n");
 #endif
-                if (n->isRoot())
+                if (n->isRoot()) {
                     n->sortBuffer();
-                else {
+                } else {
                     n->mergeBuffer();
                 }
                 tree_->emptier_->addNode(n);
@@ -303,8 +310,7 @@ namespace cbt {
         pthread_exit(NULL);
     }
 
-    void Sorter::addNode(Node* node)
-    {
+    void Sorter::addNode(Node* node) {
         pthread_mutex_lock(&queueMutex_);
         if (node) {
             // Set node as queued for emptying
@@ -318,7 +324,7 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
                 node->id_, node->buffer_.numElements());
-        for (int i=0; i<nodes_.size(); i++)
+        for (int i = 0; i < nodes_.size(); ++i)
             fprintf(stderr, "%d, ", nodes_[i]->id_);
         fprintf(stderr, "\n");
 #endif
@@ -326,17 +332,14 @@ namespace cbt {
 
 #ifdef ENABLE_PAGING
     Pager::Pager(CompressTree* tree) :
-            Slave(tree)
-    {
+            Slave(tree) {
     }
 
-    Pager::~Pager()
-    {
+    Pager::~Pager() {
     }
 
 
-    void* Pager::work()
-    {
+    void* Pager::work() {
         pthread_mutex_lock(&queueMutex_);
         pthread_barrier_wait(&tree_->threadsBarrier_);
         while (nodes_.empty() && !inputComplete_) {
@@ -367,8 +370,7 @@ namespace cbt {
         pthread_exit(NULL);
     }
 
-    void Pager::addNode(Node* node)
-    {
+    void Pager::addNode(Node* node) {
         Buffer::PageAction act = node->getPageAction();
         if (act == Buffer::PAGE_OUT) {
             pthread_mutex_lock(&queueMutex_);
@@ -384,7 +386,7 @@ namespace cbt {
         queueEmpty_ = false;
         pthread_mutex_unlock(&queueMutex_);
     }
-#endif //ENABLE_PAGING
+#endif  // ENABLE_PAGING
 
 #ifdef ENABLE_COUNTERS
     Monitor::Monitor(CompressTree* tree) :
@@ -393,33 +395,29 @@ namespace cbt {
             numMerged(0),
             actr(0),
             bctr(0),
-            cctr(0)
-    {
+            cctr(0) {
     }
 
-    Monitor::~Monitor()
-    {
+    Monitor::~Monitor() {
     }
 
-    void* Monitor::work()
-    {
+    void* Monitor::work() {
         pthread_barrier_wait(&tree_->threadsBarrier_);
         while (!inputComplete_) {
             sleep(1);
             elctr.push_back(numElements);
         }
         uint64_t tot = 0;
-        for (uint32_t i=0; i<elctr.size(); i++) {
+        for (uint32_t i = 0; i < elctr.size(); ++i) {
             tot += elctr[i];
         }
-        fprintf(stderr, "Avg. number of elements: %f\n", (float)tot / 
-                elctr.size());
+        fprintf(stderr, "Avg. number of elements: %f\n",
+                static_cast<float>(tot) / elctr.size());
         fprintf(stderr, "A: %lu, B:%lu\n", numElements, numMerged);
         elctr.clear();
     }
 
-    void Monitor::addNode(Node* n)
-    {
+    void Monitor::addNode(Node* n) {
         return;
     }
 #endif
