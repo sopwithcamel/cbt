@@ -1,9 +1,33 @@
-#ifndef LIB_COMPRESS_COMPRESSTREE_H
-#define LIB_COMPRESS_COMPRESSTREE_H
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
-#include <deque>
+// ---
+// Author: Hrishikesh Amur
+
+#ifndef SRC_COMPRESSTREE_H_
+#define SRC_COMPRESSTREE_H_
+
 #include <pthread.h>
+#include <deque>
 #include <queue>
+#include <vector>
 #include "Config.h"
 #include "Node.h"
 #include "PartialAgg.h"
@@ -23,7 +47,7 @@ namespace cbt {
         ALWAYS,
         IF_FULL
     };
-    
+
     class Node;
     class Emptier;
     class Compressor;
@@ -33,16 +57,7 @@ namespace cbt {
     class Monitor;
 #endif
 
-    class CompressTree
-    {
-        friend class Node;
-        friend class Compressor;
-        friend class Emptier;
-        friend class Sorter;
-        friend class Pager;
-#ifdef ENABLE_COUNTERS
-        friend class Monitor;
-#endif
+    class CompressTree {
       public:
         CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
@@ -54,9 +69,19 @@ namespace cbt {
         bool bulk_insert(PartialAgg** paos, uint64_t num);
         /* read values */
         // returns true if there are more values to be read and false otherwise
-        bool bulk_read(PartialAgg**& pao_list, uint64_t& num_read, uint64_t max);
+        bool bulk_read(PartialAgg** pao_list, uint64_t& num_read,
+                uint64_t max);
         bool nextValue(void*& hash, PartialAgg*& agg);
+
       private:
+        friend class Node;
+        friend class Compressor;
+        friend class Emptier;
+        friend class Sorter;
+        friend class Pager;
+#ifdef ENABLE_COUNTERS
+        friend class Monitor;
+#endif
         bool addLeafToEmpty(Node* node);
         bool createNewRoot(Node* otherChild);
         void emptyTree();
@@ -101,7 +126,7 @@ namespace cbt {
 
         /* Members for async-sorting */
         Sorter* sorter_;
-        
+
         /* Compression-related */
         Compressor* compressor_;
 
@@ -117,4 +142,4 @@ namespace cbt {
     };
 }
 
-#endif
+#endif  // SRC_COMPRESSTREE_H_
