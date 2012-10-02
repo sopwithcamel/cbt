@@ -1,11 +1,35 @@
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+// ---
+// Author: Hrishikesh Amur
+
 #include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sstream>
 #include "Buffer.h"
 #include "CompressTree.h"
-//#include "compsort.h"
-//#include "rle.h"
+// #include "compsort.h"
+// #include "rle.h"
 #include "snappy.h"
 
 namespace cbt {
@@ -15,37 +39,41 @@ namespace cbt {
             state_(DECOMPRESSED),
             c_hashlen_(0),
             c_sizelen_(0),
-            c_datalen_(0)
-    {
+            c_datalen_(0) {
     }
 
-    Buffer::List::~List()
-    {
+    Buffer::List::~List() {
         deallocate();
     }
 
-    void Buffer::List::allocate(bool isLarge)
-    {
+    void Buffer::List::allocate(bool isLarge) {
         uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
         uint32_t buf = cbt::BUFFER_SIZE;
         if (isLarge) {
             nel *= 2;
             buf *= 2;
         }
-        hashes_ = (uint32_t*)malloc(sizeof(uint32_t) * nel);
-        sizes_ = (uint32_t*)malloc(sizeof(uint32_t) * nel);
-        data_ = (char*)malloc(buf);
+        hashes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
+        sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
+        data_ = reinterpret_cast<char*>(malloc(buf));
     }
 
-    void Buffer::List::deallocate()
-    {    
-        if (hashes_) { free(hashes_); hashes_ = NULL;}
-        if (sizes_) { free(sizes_); sizes_ = NULL;}
-        if (data_) { free(data_); data_ = NULL;}
+    void Buffer::List::deallocate() {
+        if (hashes_) {
+            free(hashes_);
+            hashes_ = NULL;
+        }
+        if (sizes_) {
+            free(sizes_);
+            sizes_ = NULL;
+        }
+        if (data_) {
+            free(data_);
+            data_ = NULL;
+        }
     }
 
-    void Buffer::List::setEmpty()
-    {
+    void Buffer::List::setEmpty() {
         num_ = 0;
         size_ = 0;
         state_ = DECOMPRESSED;
@@ -54,8 +82,7 @@ namespace cbt {
     Buffer::Buffer() :
         compressible_(true),
         queuedForCompAct_(false),
-        compAct_(NONE)
-    {
+        compAct_(NONE) {
         pthread_mutex_init(&compActMutex_, NULL);
         pthread_cond_init(&compActCond_, NULL);
 
@@ -69,8 +96,7 @@ namespace cbt {
 #endif
     }
 
-    Buffer::~Buffer()
-    {
+    Buffer::~Buffer() {
         deallocate();
 
         pthread_mutex_destroy(&compActMutex_);
@@ -81,63 +107,54 @@ namespace cbt {
 #endif
     }
 
-    Buffer::List* Buffer::addList(bool isLarge/*=false*/)
-    {
+    Buffer::List* Buffer::addList(bool isLarge/* = false */) {
         List *l = new List();
         l->allocate(isLarge);
         lists_.push_back(l);
         return l;
     }
 
-    void Buffer::delList(uint32_t ind)
-    {
+    void Buffer::delList(uint32_t ind) {
         if (ind < lists_.size()) {
             delete lists_[ind];
             lists_.erase(lists_.begin() + ind);
         }
     }
 
-    void Buffer::addList(Buffer::List* l)
-    {
+    void Buffer::addList(Buffer::List* l) {
         lists_.push_back(l);
     }
 
-    void Buffer::clear()
-    {
+    void Buffer::clear() {
         lists_.clear();
     }
 
-    void Buffer::deallocate()
-    {
-        for (uint32_t i=0; i<lists_.size(); i++)
+    void Buffer::deallocate() {
+        for (uint32_t i = 0; i < lists_.size(); ++i)
             lists_[i]->deallocate();
     }
 
-    bool Buffer::empty() const
-    {
+    bool Buffer::empty() const {
         return (numElements() == 0);
     }
 
-    uint32_t Buffer::numElements() const
-    {
+    uint32_t Buffer::numElements() const {
         uint32_t num = 0;
-        for (uint32_t i=0; i<lists_.size(); i++)
+        for (uint32_t i = 0; i < lists_.size(); ++i)
             num += lists_[i]->num_;
         return num;
     }
 
-    void Buffer::setParent(Node* n)
-    {
+    void Buffer::setParent(Node* n) {
         node_ = n;
     }
 
-    bool Buffer::compress()
-    {
+    bool Buffer::compress() {
         if (!empty()) {
             // allocate memory for one list
             Buffer compressed;
 
-            for (uint32_t i=0; i<lists_.size(); i++) {
+            for (uint32_t i = 0; i < lists_.size(); ++i) {
                 Buffer::List* l = lists_[i];
                 if (l->state_ == Buffer::List::COMPRESSED)
                     continue;
@@ -147,15 +164,15 @@ namespace cbt {
 #endif
                 compressed.addList();
                 // latest added list
-                Buffer::List* cl = 
+                Buffer::List* cl =
                         compressed.lists_[compressed.lists_.size()-1];
-                snappy::RawCompress((const char*)l->hashes_, 
-                        l->num_ * sizeof(uint32_t), 
-                        (char*)cl->hashes_,
+                snappy::RawCompress((const char*)l->hashes_,
+                        l->num_ * sizeof(uint32_t),
+                        reinterpret_cast<char*>(cl->hashes_),
                         &l->c_hashlen_);
-                snappy::RawCompress((const char*)l->sizes_, 
-                        l->num_ * sizeof(uint32_t), 
-                        (char*)cl->sizes_,
+                snappy::RawCompress((const char*)l->sizes_,
+                        l->num_ * sizeof(uint32_t),
+                        reinterpret_cast<char*>(cl->sizes_),
                         &l->c_sizelen_);
 /*
                 compsort::compress(l->hashes_, l->num_,
@@ -163,8 +180,8 @@ namespace cbt {
                 rle::encode(l->sizes_, l->num_, cl->sizes_,
                         (uint32_t&)l->c_sizelen_);
 */
-                snappy::RawCompress(l->data_, l->size_, 
-                        cl->data_, 
+                snappy::RawCompress(l->data_, l->size_,
+                        cl->data_,
                         &l->c_datalen_);
                 l->deallocate();
                 l->hashes_ = cl->hashes_;
@@ -182,13 +199,12 @@ namespace cbt {
         return true;
     }
 
-    bool Buffer::decompress()
-    {
+    bool Buffer::decompress() {
         if (!empty()) {
             // allocate memory for decompressed buffers
             Buffer decompressed;
 
-            for (uint32_t i=0; i<lists_.size(); i++) {
+            for (uint32_t i = 0; i < lists_.size(); ++i) {
                 Buffer::List* cl = lists_[i];
                 if (cl->state_ == Buffer::List::DECOMPRESSED)
                     continue;
@@ -196,10 +212,10 @@ namespace cbt {
                 // latest added list
                 Buffer::List* l =
                         decompressed.lists_[decompressed.lists_.size()-1];
-                snappy::RawUncompress((const char*)cl->hashes_, 
-                        cl->c_hashlen_, (char*)l->hashes_);
-                snappy::RawUncompress((const char*)cl->sizes_, 
-                        cl->c_sizelen_, (char*)l->sizes_);
+                snappy::RawUncompress((const char*)cl->hashes_,
+                        cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
+                snappy::RawUncompress((const char*)cl->sizes_,
+                        cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
 /*
                 uint32_t siz;
                 compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
@@ -225,15 +241,13 @@ namespace cbt {
         return true;
     }
 
-    void Buffer::setCompressible(bool flag)
-    {
+    void Buffer::setCompressible(bool flag) {
         pthread_mutex_lock(&compActMutex_);
         compressible_ = flag;
         pthread_mutex_unlock(&compActMutex_);
     }
 
-    bool Buffer::checkCompress()
-    {
+    bool Buffer::checkCompress() {
         pthread_mutex_lock(&compActMutex_);
         // check if node already in compression action list
         if (queuedForCompAct_) {
@@ -269,9 +283,8 @@ namespace cbt {
             }
         }
     }
-    
-    bool Buffer::checkDecompress()
-    {
+
+    bool Buffer::checkDecompress() {
         pthread_mutex_lock(&compActMutex_);
         // check if node already in list
         if (queuedForCompAct_) {
@@ -283,8 +296,9 @@ namespace cbt {
                 fprintf(stderr, "Node %d reset to decompress\n", node_->id_);
 #endif
                 return false;
-            } else { // we're decompressing twice
-                fprintf(stderr, "Trying to decompress node %d twice", node_->id_);
+            } else {  // we're decompressing twice
+                fprintf(stderr, "Trying to decompress node %d twice",
+                        node_->id_);
                 assert(false);
             }
         } else {
@@ -301,9 +315,8 @@ namespace cbt {
             }
         }
     }
-    
-    void Buffer::waitForCompressAction(const CompressionAction& act)
-    {
+
+    void Buffer::waitForCompressAction(const CompressionAction& act) {
         // make sure the buffer has been decompressed
         pthread_mutex_lock(&compActMutex_);
         while (queuedForCompAct_ && compAct_ == act)
@@ -311,8 +324,7 @@ namespace cbt {
         pthread_mutex_unlock(&compActMutex_);
     }
 
-    void Buffer::performCompressAction()
-    {
+    void Buffer::performCompressAction() {
         pthread_mutex_lock(&compActMutex_);
         if (compAct_ == COMPRESS) {
             compress();
@@ -331,22 +343,20 @@ namespace cbt {
         pthread_mutex_unlock(&compActMutex_);
     }
 
-    Buffer::CompressionAction Buffer::getCompressAction()
-    {
+    Buffer::CompressionAction Buffer::getCompressAction() {
         pthread_mutex_lock(&compActMutex_);
         CompressionAction act = compAct_;
         pthread_mutex_unlock(&compActMutex_);
         return act;
-    }    
+    }
 
 #ifdef ENABLE_PAGING
-    bool Buffer::pageOut()
-    {
+    bool Buffer::pageOut() {
         if (!empty()) {
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "paged out node %d; lists: ", node_->id_);
 #endif
-            for (uint32_t i=0; i<lists_.size(); i++) {
+            for (uint32_t i = 0; i < lists_.size(); ++i) {
                 Buffer::List* l = lists_[i];
                 /* List may be already paged out or yet to be compressed */
                 if (l->state_ != List::COMPRESSED)
@@ -360,7 +370,8 @@ namespace cbt {
                         ret3 != l->c_datalen_) {
                     fprintf(stderr, "Node %d page-out fail! Error: %s\n",
                             node_->id_, strerror(errno));
-                    fprintf(stderr, "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
+                    fprintf(stderr,
+                            "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
                             l->c_hashlen_, ret1, l->c_sizelen_, ret2,
                             l->c_datalen_, ret3);
                     assert(false);
@@ -379,8 +390,7 @@ namespace cbt {
         return true;
     }
 
-    bool Buffer::pageIn()
-    {
+    bool Buffer::pageIn() {
         // set file pointer to beginning of file
         rewind(f_);
 
@@ -389,7 +399,7 @@ namespace cbt {
 #endif
 
         Buffer paged_in;
-        for (uint32_t i=0; i<lists_.size(); i++) {
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
             List* l = lists_[i];
             // check if the list is already paged in
             if (l->state_ != List::PAGED_OUT)
@@ -404,7 +414,8 @@ namespace cbt {
                     ret3 != l->c_datalen_) {
                 fprintf(stderr, "Node %d page-in fail! Error: %s\n",
                         node_->id_, strerror(errno));
-                fprintf(stderr, "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
+                fprintf(stderr,
+                        "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
                         l->c_hashlen_, ret1, l->c_sizelen_, ret2,
                         l->c_datalen_, ret3);
                 assert(false);
@@ -430,37 +441,29 @@ namespace cbt {
         return true;
     }
 
-    void Buffer::setPageable(bool flag)
-    {
+    void Buffer::setPageable(bool flag) {
         pthread_mutex_lock(&pageMutex_);
         pageable_ = flag;
         pthread_mutex_unlock(&pageMutex_);
     }
 
-    void Buffer::setupPaging()
-    {
-        char* fileName = (char*)malloc(100);
-        char* nodeNum = (char*)malloc(10);
-        strcpy(fileName, "/localfs/hamur/minni_data/");
-        sprintf(nodeNum, "%d", node_->id_);
-        strcat(fileName, nodeNum);
-        strcat(fileName, ".buf");
-        f_ = fopen(fileName, "w+");
+    void Buffer::setupPaging() {
+        stringstream fileName;
+        fileName << "/localfs/hamur/minni_data/";
+        fileName << node_->id_;
+        fileName << ".buf";
+        f_ = fopen(fileName.str().c_str(), "w+");
         if (f_ == NULL) {
             fprintf(stderr, "Error opening file: %s\n", strerror(errno));
             assert(false);
         }
-        free(fileName);
-        free(nodeNum);
     }
 
-    void Buffer::cleanupPaging()
-    {
+    void Buffer::cleanupPaging() {
         fclose(f_);
     }
 
-    bool Buffer::checkPageOut()
-    {
+    bool Buffer::checkPageOut() {
         pthread_mutex_lock(&pageMutex_);
         // check if node already in list
         if (queuedForPaging_) {
@@ -468,7 +471,7 @@ namespace cbt {
                 /* Shouldn't happen */
                 assert(false);
                 return false;
-            } else { // we're paging out twice
+            } else {  // we're paging out twice
                 assert(false);
                 return false;
             }
@@ -480,8 +483,7 @@ namespace cbt {
         }
     }
 
-    bool Buffer::checkPageIn()
-    {
+    bool Buffer::checkPageIn() {
         pthread_mutex_lock(&pageMutex_);
         // check if node already in list
         if (queuedForPaging_) {
@@ -491,7 +493,7 @@ namespace cbt {
                 pageAct_ = PAGE_IN;
                 pthread_mutex_unlock(&pageMutex_);
                 return false;
-            } else { // we're paging-in twice
+            } else {  // we're paging-in twice
                 assert(false);
             }
         } else {
@@ -502,16 +504,14 @@ namespace cbt {
         }
     }
 
-    void Buffer::waitForPageAction(const PageAction& act)
-    {
+    void Buffer::waitForPageAction(const PageAction& act) {
         pthread_mutex_lock(&pageMutex_);
         while (queuedForPaging_ && pageAct_ == act)
             pthread_cond_wait(&pageCond_, &pageMutex_);
         pthread_mutex_unlock(&pageMutex_);
     }
 
-    bool Buffer::performPageAction()
-    {
+    bool Buffer::performPageAction() {
         bool ret = true;
         pthread_mutex_lock(&pageMutex_);
         if (pageAct_ == PAGE_OUT) {
@@ -531,9 +531,8 @@ namespace cbt {
         return ret;
     }
 
-    Buffer::PageAction Buffer::getPageAction()
-    {
+    Buffer::PageAction Buffer::getPageAction() {
         return pageAct_;
-    }    
-#endif //ENABLE_PAGING
+    }
+#endif  // ENABLE_PAGING
 }
