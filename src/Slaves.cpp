@@ -59,7 +59,7 @@ namespace cbt {
 
     void* Slave::callHelper(void* context)
     {
-        return ((Slave*)context)->work();
+        return static_cast<Slave*>(context)->work();
     }
 
     void Slave::printElements() const
@@ -169,12 +169,12 @@ namespace cbt {
                 }
                 depNodes.pop_front();
             }
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d (size: %u) added to to-empty list: ", node->id_, node->buffer_.numElements());
+            queue_.printElements();
+#endif
         }
         pthread_mutex_unlock(&queueMutex_);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d (size: %u) added to to-empty list: ", node->id_, node->buffer_.numElements());
-        queue_.printElements();
-#endif
     }
 
     Compressor::Compressor(CompressTree* tree) :
@@ -313,11 +313,13 @@ namespace cbt {
             pthread_mutex_unlock(&node->queuedForEmptyMutex_);
             nodes_.push_back(node);
             queueEmpty_ = false;
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
+                    node->id_, node->buffer_.numElements());
+#endif
         }
         pthread_mutex_unlock(&queueMutex_);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
-                node->id_, node->buffer_.numElements());
         for (int i=0; i<nodes_.size(); i++)
             fprintf(stderr, "%d, ", nodes_[i]->id_);
         fprintf(stderr, "\n");

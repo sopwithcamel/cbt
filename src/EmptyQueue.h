@@ -36,8 +36,8 @@ namespace cbt {
             PQ::iterator it = nodeList_.begin();
             uint32_t maxPrio = it->second;
             PQ::iterator maxNode = it;
-            it++;
-            for (; it != nodeList_.end(); it++) {
+            ++it;
+            for (; it != nodeList_.end(); ++it) {
                 if (it->second > maxPrio) {
                     maxNode = it;
                     maxPrio = it->second;
@@ -65,7 +65,7 @@ namespace cbt {
         void printElements() const
         {
             for (PQ::const_iterator it=nodeList_.begin(); it != nodeList_.end(); 
-                    it++)
+                    ++it)
                 fprintf(stderr, "%d(%d), ", it->first->id(), it->second);
             fprintf(stderr, "\n");
         }
