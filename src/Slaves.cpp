@@ -322,12 +322,12 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
                     node->id_, node->buffer_.numElements());
+            fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
+                    node->id_, node->buffer_.numElements());
 #endif
         }
         pthread_mutex_unlock(&queueMutex_);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
-                node->id_, node->buffer_.numElements());
         for (int i = 0; i < nodes_.size(); ++i)
             fprintf(stderr, "%d, ", nodes_[i]->id_);
         fprintf(stderr, "\n");
