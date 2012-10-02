@@ -1,38 +1,38 @@
 /* -*- Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*- */
-#ifndef _HASHUTIL_H_
-#define _HASHUTIL_H_
+#ifndef SRC_HASHUTIL_H_
+#define SRC_HASHUTIL_H_
 
 #include <sys/types.h>
-#include <string>
 #include <stdlib.h>
 #include <stdint.h>
 #include <openssl/evp.h>
+#include <string>
 #include "fnv.h"
 
 using namespace std;
 
 #define rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
-#define mix(a,b,c)		                \
-    {						\
-	a -= c;  a ^= rot(c, 4);  c += b;	\
-	b -= a;  b ^= rot(a, 6);  a += c;	\
-	c -= b;  c ^= rot(b, 8);  b += a;	\
-	a -= c;  a ^= rot(c,16);  c += b;	\
-	b -= a;  b ^= rot(a,19);  a += c;	\
-	c -= b;  c ^= rot(b, 4);  b += a;	\
-    }
+#define mix(a,b,c)\
+{\
+    a -= c;  a ^= rot(c, 4);  c += b;\
+    b -= a;  b ^= rot(a, 6);  a += c;\
+    c -= b;  c ^= rot(b, 8);  b += a;\
+    a -= c;  a ^= rot(c,16);  c += b;\
+    b -= a;  b ^= rot(a,19);  a += c;\
+    c -= b;  c ^= rot(b, 4);  b += a;\
+}
 
-#define final(a,b,c)				\
-    {						\
-	c ^= b; c -= rot(b,14);			\
-	a ^= c; a -= rot(c,11);			\
-	b ^= a; b -= rot(a,25);			\
-	c ^= b; c -= rot(b,16);			\
-	a ^= c; a -= rot(c,4);			\
-	b ^= a; b -= rot(a,14);			\
-	c ^= b; c -= rot(b,24);			\
-    }
-    // Assuming little endian
+#define final(a,b,c)\
+{						\
+    c ^= b; c -= rot(b,14);\
+    a ^= c; a -= rot(c,11);\
+    b ^= a; b -= rot(a,25);\
+    c ^= b; c -= rot(b,16);\
+    a ^= c; a -= rot(c,4);\
+    b ^= a; b -= rot(a,14);\
+    c ^= b; c -= rot(b,24);\
+}
+// Assuming little endian
 #define HASH_LITTLE_ENDIAN 1
 
 #define get16bits(d) (*((const uint16_t *) (d)))
@@ -81,6 +81,6 @@ class HashUtil {
     HashUtil();
 };
 
-#endif  // #ifndef _HASHUTIL_H_
+#endif  // SRC_HASHUTIL_H_
 
 
