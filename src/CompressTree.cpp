@@ -1,10 +1,32 @@
-#include <assert.h>
-#include <deque>
-#include <stdio.h>
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
+// ---
+// Author: Hrishikesh Amur
+
+#include <assert.h>
+#include <stdio.h>
 #define __STDC_LIMIT_MACROS /* for UINT32_MAX etc. */
 #include <stdint.h>
 #include <stdlib.h>
+#include <deque>
 
 #include "Buffer.h"
 #include "CompressTree.h"
@@ -30,12 +52,11 @@ namespace cbt {
         lastElement_(0),
         threadsStarted_(false),
         nodesInMemory_(nodesInMemory),
-        numEvicted_(0)
-    {
+        numEvicted_(0) {
         BUFFER_SIZE = buffer_size;
         MAX_ELS_PER_BUFFER = BUFFER_SIZE / pao_size;
         EMPTY_THRESHOLD = MAX_ELS_PER_BUFFER >> 1;
-    
+
         pthread_mutex_init(&rootNodeAvailableMutex_, NULL);
         pthread_cond_init(&rootNodeAvailableForWriting_, NULL);
 
@@ -50,23 +71,20 @@ namespace cbt {
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
     }
 
-    CompressTree::~CompressTree()
-    {
+    CompressTree::~CompressTree() {
         pthread_cond_destroy(&rootNodeAvailableForWriting_);
         pthread_mutex_destroy(&rootNodeAvailableMutex_);
         pthread_barrier_destroy(&threadsBarrier_);
     }
 
-    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num)
-    {
+    bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num) {
         bool ret = true;
-        for (uint64_t i=0; i<num; i++)
+        for (uint64_t i = 0; i < num; ++i)
             ret &= insert(paos[i]);
         return ret;
     }
 
-    bool CompressTree::insert(PartialAgg* agg)
-    {
+    bool CompressTree::insert(PartialAgg* agg) {
         // copy buf into root node buffer
         // root node buffer always decompressed
         allFlush_ = false;
@@ -77,7 +95,7 @@ namespace cbt {
             // check if rootNode_ is available
             inputNode_->checkSerializationIntegrity();
             pthread_mutex_lock(&rootNodeAvailableMutex_);
-            while (!rootNode_->buffer_.empty() || 
+            while (!rootNode_->buffer_.empty() ||
                     rootNode_->queuedForEmptying_) {
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "inserter sleeping\n");
@@ -105,13 +123,12 @@ namespace cbt {
         return ret;
     }
 
-    bool CompressTree::bulk_read(PartialAgg**& pao_list, uint64_t& num_read,
-            uint64_t max)
-    {
+    bool CompressTree::bulk_read(PartialAgg** pao_list, uint64_t& num_read,
+            uint64_t max) {
         uint64_t hash;
-        void* ptrToHash = (void*)&hash;
+        void* ptrToHash = reinterpret_cast<void*>(&hash);
         num_read = 0;
-        while(num_read < max) {
+        while (num_read < max) {
             if (!(nextValue(ptrToHash, pao_list[num_read])))
                 return false;
             num_read++;
@@ -119,8 +136,7 @@ namespace cbt {
         return true;
     }
 
-    bool CompressTree::nextValue(void*& hash, PartialAgg*& agg)
-    {
+    bool CompressTree::nextValue(void*& hash, PartialAgg*& agg) {
         if (!allFlush_) {
             /* wait for all nodes to be sorted and emptied
                before proceeding */
@@ -132,7 +148,7 @@ namespace cbt {
                 sorter_->waitUntilCompletionNoticeReceived();
                 emptier_->waitUntilCompletionNoticeReceived();
 #ifdef ENABLE_PAGING
-            } while (!sorter_->empty() || !emptier_->empty() || 
+            } while (!sorter_->empty() || !emptier_->empty() ||
                     !pager_->empty());
 #else
             } while (!sorter_->empty() || !emptier_->empty());
@@ -157,7 +173,7 @@ namespace cbt {
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->buffer_.lists_[0];
-        hash = (void*)&l->hashes_[lastElement_];
+        hash = reinterpret_cast<void*>(&l->hashes_[lastElement_]);
         ops->createPAO(NULL, &agg);
 //        if (lastLeafRead_ == 0)
 //            fprintf(stderr, "%ld\n", lastOffset_);
@@ -194,17 +210,16 @@ namespace cbt {
         return true;
     }
 
-    void CompressTree::emptyTree()
-    {
+    void CompressTree::emptyTree() {
         std::deque<Node*> delList1;
         std::deque<Node*> delList2;
         delList1.push_back(rootNode_);
         while (!delList1.empty()) {
             Node* n = delList1.front();
             delList1.pop_front();
-            for (uint32_t i=0; i<n->children_.size(); i++) {
+            for (uint32_t i = 0; i < n->children_.size(); ++i) {
                 delList1.push_back(n->children_[i]);
-            }            
+            }
             delList2.push_back(n);
         }
         while (!delList2.empty()) {
@@ -218,18 +233,17 @@ namespace cbt {
         lastLeafRead_ = 0;
         lastOffset_ = 0;
         lastElement_ = 0;
-    
+
         nodeCtr = 0;
     }
 
-    bool CompressTree::flushBuffers()
-    {
+    bool CompressTree::flushBuffers() {
         Node* curNode;
         std::deque<Node*> visitQueue;
         fprintf(stderr, "Starting to flush\n");
         // check if rootNode_ is available
         pthread_mutex_lock(&rootNodeAvailableMutex_);
-        while (!rootNode_->buffer_.empty() || 
+        while (!rootNode_->buffer_.empty() ||
                 rootNode_->queuedForEmptying_) {
             pthread_cond_wait(&rootNodeAvailableForWriting_,
                     &rootNodeAvailableMutex_);
@@ -262,24 +276,25 @@ namespace cbt {
         } while (!sorter_->empty() || !emptier_->empty());
 #endif
 
-        // add all leaves; 
+        // add all leaves;
         visitQueue.push_back(rootNode_);
-        while(!visitQueue.empty()) {
+        while (!visitQueue.empty()) {
             curNode = visitQueue.front();
             visitQueue.pop_front();
             if (curNode->isLeaf()) {
                 allLeaves_.push_back(curNode);
 #ifdef CT_NODE_DEBUG
-                fprintf(stderr, "Pushing node %d to all-leaves\t", curNode->id_);
+                fprintf(stderr, "Pushing node %d to all-leaves\t",
+                        curNode->id_);
                 fprintf(stderr, "Now has: ");
-                for (int i=0; i<allLeaves_.size(); i++) {
+                for (int i = 0; i < allLeaves_.size(); ++i) {
                     fprintf(stderr, "%d ", allLeaves_[i]->id_);
                 }
                 fprintf(stderr, "\n");
 #endif
                 continue;
             }
-            for (uint32_t i=0; i<curNode->children_.size(); i++) {
+            for (uint32_t i = 0; i < curNode->children_.size(); ++i) {
                 visitQueue.push_back(curNode->children_[i]);
             }
         }
@@ -292,21 +307,19 @@ namespace cbt {
         }
         fprintf(stderr, "Tree has depth: %d\n", depth);
         uint64_t numit = 0;
-        for (uint64_t i=0; i<allLeaves_.size(); i++)
+        for (uint64_t i = 0; i < allLeaves_.size(); ++i)
             numit += allLeaves_[i]->buffer_.numElements();
         fprintf(stderr, "Tree has %ld elements\n", numit);
         return true;
     }
 
-    bool CompressTree::addLeafToEmpty(Node* node)
-    {
+    bool CompressTree::addLeafToEmpty(Node* node) {
         leavesToBeEmptied_.push_back(node);
         return true;
     }
 
     /* A full leaf is handled by splitting the leaf into two leaves.*/
-    void CompressTree::handleFullLeaves()
-    {
+    void CompressTree::handleFullLeaves() {
         while (!leavesToBeEmptied_.empty()) {
             Node* node = leavesToBeEmptied_.front();
             leavesToBeEmptied_.pop_front();
@@ -331,7 +344,8 @@ namespace cbt {
                 l2->scheduleBufferCompressAction(Buffer::COMPRESS);
             }
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Leaf node %d removed from full-leaf-list\n", node->id_);
+            fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
+                    node->id_);
 #endif
             pthread_mutex_lock(&node->queuedForEmptyMutex_);
             node->queuedForEmptying_ = false;
@@ -339,8 +353,7 @@ namespace cbt {
         }
     }
 
-    void CompressTree::startThreads()
-    {
+    void CompressTree::startThreads() {
         // create root node; initially a leaf
         rootNode_ = new Node(this, 0);
         rootNode_->buffer_.addList();
@@ -355,7 +368,7 @@ namespace cbt {
         rootNode_->buffer_.setPageable(false);
         inputNode_->buffer_.setPageable(false);
 #endif
-        
+
         emptyType_ = IF_FULL;
 
         sorter_ = new Sorter(this);
@@ -381,8 +394,7 @@ namespace cbt {
         threadsStarted_ = true;
     }
 
-    void CompressTree::stopThreads()
-    {
+    void CompressTree::stopThreads() {
         delete inputNode_;
 
         sorter_->stopThreads();
@@ -397,14 +409,13 @@ namespace cbt {
         threadsStarted_ = false;
     }
 
-    bool CompressTree::createNewRoot(Node* otherChild)
-    {
+    bool CompressTree::createNewRoot(Node* otherChild) {
         Node* newRoot = new Node(this, rootNode_->level() + 1);
         newRoot->buffer_.addList();
         newRoot->separator_ = UINT32_MAX;
         newRoot->buffer_.setCompressible(false);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d is new root; children are %d and %d\n", 
+        fprintf(stderr, "Node %d is new root; children are %d and %d\n",
                 newRoot->id_, rootNode_->id_, otherChild->id_);
 #endif
         // add two children of new root
