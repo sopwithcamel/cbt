@@ -1,7 +1,30 @@
-#ifndef LIB_COMPRESS_SLAVES_H
-#define LIB_COMPRESS_SLAVES_H
-#include <iostream>
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+// ---
+// Author: Hrishikesh Amur
+
+#ifndef SRC_SLAVES_H_
+#define SRC_SLAVES_H_
 #include <stdint.h>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -15,15 +38,16 @@ namespace cbt {
 
     class Slave {
       public:
-        Slave(CompressTree* tree);
+        explicit Slave(CompressTree* tree);
         virtual ~Slave() {}
         virtual void addNode(Node* node) = 0;
         virtual bool empty() const;
-        virtual bool wakeup();    
+        virtual bool wakeup();
         virtual void waitUntilCompletionNoticeReceived();
 
         void startThreads();
         void stopThreads();
+
       protected:
         static void* callHelper(void* context);
         virtual void printElements() const;
@@ -44,6 +68,7 @@ namespace cbt {
         bool askForCompletionNotice_;
 
         std::deque<Node*> nodes_;
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -51,16 +76,16 @@ namespace cbt {
 
     class Emptier : public Slave {
         struct PrioComp {
-            bool operator()(uint32_t lhs, uint32_t rhs)
-            {
+            bool operator()(uint32_t lhs, uint32_t rhs) {
                 return (lhs > rhs);
             }
         };
       public:
-        Emptier(CompressTree* tree);
+        explicit Emptier(CompressTree* tree);
         ~Emptier();
         void* work();
         void addNode(Node* node);
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -70,10 +95,11 @@ namespace cbt {
 
     class Compressor : public Slave {
       public:
-        Compressor(CompressTree* tree);
+        explicit Compressor(CompressTree* tree);
         ~Compressor();
         void* work();
         void addNode(Node* node);
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -81,10 +107,11 @@ namespace cbt {
 
     class Sorter : public Slave {
       public:
-        Sorter(CompressTree* tree);
+        explicit Sorter(CompressTree* tree);
         ~Sorter();
         void* work();
         void addNode(Node* node);
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -92,10 +119,11 @@ namespace cbt {
 
     class Pager : public Slave {
       public:
-        Pager(CompressTree* tree);
+        explicit Pager(CompressTree* tree);
         ~Pager();
         void* work();
         void addNode(Node* node);
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -104,11 +132,11 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
     class Monitor : public Slave {
       public:
-        static void* callHelper(void* context);
-        Monitor(CompressTree* tree);
+        explicit Monitor(CompressTree* tree);
         ~Monitor();
         void* work();
         void addNode(Node* n);
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -125,5 +153,4 @@ namespace cbt {
     };
 #endif
 }
-
-#endif
+#endif  // SRC_SLAVES_H_
