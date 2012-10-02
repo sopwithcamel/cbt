@@ -57,12 +57,32 @@ namespace cbt {
         }
     }
 
+    void* Slave::callHelper(void* context)
+    {
+        return ((Slave*)context)->work();
+    }
+
     void Slave::printElements() const
     {
         for (uint32_t i=0; i<nodes_.size(); i++) {
             fprintf(stderr, "%d, ", nodes_[i]->id());
         }
         fprintf(stderr, "\n");
+    }
+
+    void Slave::startThreads()
+    {
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_create(&thread_, &attr, callHelper, (void*)this);
+    }
+
+    void Slave::stopThreads()
+    {
+        void* status;
+        setInputComplete(true);
+        wakeup();
+        pthread_join(thread_, &status);
     }
 
     Emptier::Emptier(CompressTree* tree) :
@@ -72,11 +92,6 @@ namespace cbt {
 
     Emptier::~Emptier()
     {
-    }
-
-    void* Emptier::callHelper(void *context)
-    {
-        return ((Emptier*)context)->work();
     }
 
     void* Emptier::work()
@@ -171,11 +186,6 @@ namespace cbt {
     {
     }
 
-    void* Compressor::callHelper(void *context)
-    {
-        return ((Compressor*)context)->work();
-    }
-
     void* Compressor::work()
     {
         pthread_mutex_lock(&queueMutex_);
@@ -248,11 +258,6 @@ namespace cbt {
 
     Sorter::~Sorter()
     {
-    }
-
-    void* Sorter::callHelper(void *context)
-    {
-        return ((Sorter*)context)->work();
     }
 
     void* Sorter::work()
@@ -329,10 +334,6 @@ namespace cbt {
     {
     }
 
-    void* Pager::callHelper(void *context)
-    {
-        return ((Pager*)context)->work();
-    }
 
     void* Pager::work()
     {
@@ -398,11 +399,6 @@ namespace cbt {
 
     Monitor::~Monitor()
     {
-    }
-
-    void* Monitor::callHelper(void *context)
-    {
-        return ((Monitor*)context)->work();
     }
 
     void* Monitor::work()

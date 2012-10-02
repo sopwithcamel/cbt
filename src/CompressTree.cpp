@@ -358,35 +358,23 @@ namespace cbt {
         
         emptyType_ = IF_FULL;
 
-        pthread_attr_t attr;
-
         sorter_ = new Sorter(this);
-        pthread_attr_init(&attr);
-        pthread_create(&sorter_->thread_, &attr,
-                &Sorter::callHelper, (void*)sorter_);
+        sorter_->startThreads();
 
         compressor_ = new Compressor(this);
-        pthread_attr_init(&attr);
-        pthread_create(&compressor_->thread_, &attr, 
-                &Compressor::callHelper, (void*)compressor_);
+        compressor_->startThreads();
 
         emptier_ = new Emptier(this);
-        pthread_attr_init(&attr);
-        pthread_create(&emptier_->thread_, &attr,
-                &Emptier::callHelper, (void*)emptier_);
+        emptier_->startThreads();
 
 #ifdef ENABLE_PAGING
         pager_ = new Pager(this);
-        pthread_attr_init(&attr);
-        pthread_create(&pager_->thread_, &attr,
-                &Pager::callHelper, (void*)pager_);
+        pager_->startThreads();
 #endif
 
 #ifdef ENABLE_COUNTERS
         monitor_ = new Monitor(this);
-        pthread_attr_init(&attr);
-        pthread_create(&monitor_->thread_, &attr,
-                &Monitor::callHelper, (void*)monitor_);
+        monitor_->startThreads();
 #endif
 
         pthread_barrier_wait(&threadsBarrier_);
@@ -395,26 +383,16 @@ namespace cbt {
 
     void CompressTree::stopThreads()
     {
-        void* status;
         delete inputNode_;
 
-        sorter_->setInputComplete(true);
-        sorter_->wakeup();
-        pthread_join(sorter_->thread_, &status);
-        emptier_->setInputComplete(true);
-        emptier_->wakeup();
-        pthread_join(emptier_->thread_, &status);
-        compressor_->setInputComplete(true);
-        compressor_->wakeup();
-        pthread_join(compressor_->thread_, &status);
+        sorter_->stopThreads();
+        emptier_->stopThreads();
+        compressor_->stopThreads();
 #ifdef ENABLE_PAGING
-        pager_->setInputComplete(true);
-        pager_->wakeup();
-        pthread_join(pager_->thread_, &status);
+        pager_->stopThreads();
 #endif
 #ifdef ENABLE_COUNTERS
-        monitor_->setInputComplete(true);
-        pthread_join(monitor_->thread_, &status);
+        monitor_->stopThreads();
 #endif
         threadsStarted_ = false;
     }
