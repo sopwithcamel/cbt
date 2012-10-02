@@ -180,13 +180,13 @@ namespace cbt {
                 }
                 depNodes.pop_front();
             }
-        }
-        pthread_mutex_unlock(&queueMutex_);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (size: %u) added to to-empty list: ",
                 node->id_, node->buffer_.numElements());
         queue_.printElements();
 #endif
+        }
+        pthread_mutex_unlock(&queueMutex_);
     }
 
     Compressor::Compressor(CompressTree* tree) :
@@ -319,6 +319,10 @@ namespace cbt {
             pthread_mutex_unlock(&node->queuedForEmptyMutex_);
             nodes_.push_back(node);
             queueEmpty_ = false;
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
+                    node->id_, node->buffer_.numElements());
+#endif
         }
         pthread_mutex_unlock(&queueMutex_);
 #ifdef CT_NODE_DEBUG

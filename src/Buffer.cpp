@@ -34,6 +34,9 @@
 
 namespace cbt {
     Buffer::List::List() :
+            hashes_(NULL),
+            sizes_(NULL),
+            data_(NULL),
             num_(0),
             size_(0),
             state_(DECOMPRESSED),
@@ -365,18 +368,18 @@ namespace cbt {
                 ret1 = fwrite(l->hashes_, 1, l->c_hashlen_, f_);
                 ret2 = fwrite(l->sizes_, 1, l->c_sizelen_, f_);
                 ret3 = fwrite(l->data_, 1, l->c_datalen_, f_);
-#ifdef ENABLE_ASSERT_CHECKS
                 if (ret1 != l->c_hashlen_ || ret2 != l->c_sizelen_ ||
                         ret3 != l->c_datalen_) {
+                    assert(false);
+#ifdef ENABLE_ASSERT_CHECKS
                     fprintf(stderr, "Node %d page-out fail! Error: %s\n",
                             node_->id_, strerror(errno));
                     fprintf(stderr,
                             "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
                             l->c_hashlen_, ret1, l->c_sizelen_, ret2,
                             l->c_datalen_, ret3);
-                    assert(false);
-                }
 #endif
+                }
                 l->deallocate();
                 l->state_ = List::PAGED_OUT;
 #ifdef CT_NODE_DEBUG
@@ -409,18 +412,18 @@ namespace cbt {
             ret1 = fread(pgin_list->hashes_, 1, l->c_hashlen_, f_);
             ret2 = fread(pgin_list->sizes_, 1, l->c_sizelen_, f_);
             ret3 = fread(pgin_list->data_, 1, l->c_datalen_, f_);
-#ifdef ENABLE_ASSERT_CHECKS
             if (ret1 != l->c_hashlen_ || ret2 != l->c_sizelen_ ||
                     ret3 != l->c_datalen_) {
+#ifdef ENABLE_ASSERT_CHECKS
                 fprintf(stderr, "Node %d page-in fail! Error: %s\n",
                         node_->id_, strerror(errno));
                 fprintf(stderr,
                         "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
                         l->c_hashlen_, ret1, l->c_sizelen_, ret2,
                         l->c_datalen_, ret3);
+#endif
                 assert(false);
             }
-#endif
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
 #endif
@@ -467,14 +470,9 @@ namespace cbt {
         pthread_mutex_lock(&pageMutex_);
         // check if node already in list
         if (queuedForPaging_) {
-            if (pageAct_ == PAGE_IN) {
-                /* Shouldn't happen */
-                assert(false);
-                return false;
-            } else {  // we're paging out twice
-                assert(false);
-                return false;
-            }
+                /* Shouldn't happen (we're paging out twice) */
+            assert(false);
+            return false;
         } else {
             queuedForPaging_ = true;
             pageAct_ = PAGE_OUT;

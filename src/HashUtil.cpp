@@ -227,7 +227,6 @@ void HashUtil::BobHash(const void *buf, size_t length, uint32_t *idx1,  uint32_t
     u.ptr = buf;
     if (HASH_LITTLE_ENDIAN && ((u.i & 0x3) == 0)) {
         const uint32_t *k = (const uint32_t *)buf;         /* read 32-bit chunks */
-        const uint8_t  *k8;
 
         /*------ all but last block: aligned reads and affect 32 bits of (a,b,c) */
         while (length > 12)
@@ -271,6 +270,7 @@ void HashUtil::BobHash(const void *buf, size_t length, uint32_t *idx1,  uint32_t
 
 #else /* make valgrind happy */
 
+        const uint8_t  *k8;
         k8 = (const uint8_t *)k;
         switch(length)
         {
@@ -623,7 +623,7 @@ uint32_t HashUtil::SuperFastHash(const void *buf, size_t len)
     uint32_t hash = len, tmp;
     int rem;
 
-    if (len <= 0 || data == NULL) return 0;
+    if (len == 0 || data == NULL) return 0;
 
     rem = len & 3;
     len >>= 2;
@@ -700,7 +700,6 @@ std::string HashUtil::MD5Hash(const char* inbuf, size_t in_length)
 std::string HashUtil::SHA1Hash(const char* inbuf, size_t in_length)
 {
     EVP_MD_CTX mdctx;
-    string ret;
     unsigned char md_value[EVP_MAX_MD_SIZE];
     unsigned int md_len;
 

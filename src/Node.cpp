@@ -86,7 +86,7 @@ namespace cbt {
     }
 
     bool Node::isLeaf() const {
-        if (children_.size() == 0)
+        if (children_.empty())
             return true;
         return false;
     }
@@ -961,7 +961,6 @@ namespace cbt {
     bool Node::checkIntegrity() {
 #ifdef ENABLE_INTEGRITY_CHECK
         uint32_t offset;
-        uint32_t* curHash;
         offset = 0;
         for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {
             Buffer::List* l = buffer_.lists_[j];
