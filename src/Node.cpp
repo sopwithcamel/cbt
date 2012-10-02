@@ -1,3 +1,26 @@
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+// ---
+// Author: Hrishikesh Amur
+
 #include <assert.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -5,6 +28,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include <queue>
+#include <vector>
 
 #include "CompressTree.h"
 #include "HashUtil.h"
@@ -16,21 +42,19 @@ namespace cbt {
         tree_(tree),
         level_(level),
         parent_(NULL),
-        queuedForEmptying_(false)
-    {
+        queuedForEmptying_(false) {
         id_ = tree_->nodeCtr++;
-        buffer_.setParent(this); 
+        buffer_.setParent(this);
 #ifdef ENABLE_PAGING
-        buffer_.setupPaging(); 
+        buffer_.setupPaging();
 #endif
 
         pthread_mutex_init(&queuedForEmptyMutex_, NULL);
-        tree_->ops->createPAO(NULL, (PartialAgg**)&lastPAO);
-        tree_->ops->createPAO(NULL, (PartialAgg**)&thisPAO);
+        tree_->ops->createPAO(NULL, &lastPAO);
+        tree_->ops->createPAO(NULL, &thisPAO);
     }
 
-    Node::~Node()
-    {
+    Node::~Node() {
         pthread_mutex_destroy(&queuedForEmptyMutex_);
 
         tree_->ops->destroyPAO(lastPAO);
@@ -41,8 +65,7 @@ namespace cbt {
 #endif
     }
 
-    bool Node::insert(PartialAgg* agg)
-    {
+    bool Node::insert(PartialAgg* agg) {
         uint32_t buf_size = tree_->ops->getSerializedSize(agg);
         const char* key = tree_->ops->getKey(agg);
 
@@ -62,22 +85,19 @@ namespace cbt {
         return true;
     }
 
-    bool Node::isLeaf() const
-    {
+    bool Node::isLeaf() const {
         if (children_.size() == 0)
             return true;
         return false;
     }
 
-    bool Node::isRoot() const
-    {
+    bool Node::isRoot() const {
         if (parent_ == NULL)
             return true;
         return false;
     }
 
-    bool Node::emptyOrCompress()
-    {
+    bool Node::emptyOrCompress() {
         if (tree_->emptyType_ == ALWAYS || isFull()) {
             scheduleBufferCompressAction(Buffer::DECOMPRESS);
             tree_->sorter_->addNode(this);
@@ -88,24 +108,23 @@ namespace cbt {
         return true;
     }
 
-    bool Node::emptyBuffer()
-    {
+    bool Node::emptyBuffer() {
         uint32_t curChild = 0;
         uint32_t curElement = 0;
-        uint32_t lastElement = 0; 
+        uint32_t lastElement = 0;
 
         /* if i am a leaf node, queue up for action later after all the
          * internal nodes have been processed */
         if (isLeaf()) {
             /* this may be called even when buffer is not full (when flushing
              * all buffers at the end). */
-            if (isFull() || isRoot()) { 
+            if (isFull() || isRoot()) {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
                         %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
 #endif
-            } else { // compress
+            } else {  // compress
                 scheduleBufferCompressAction(Buffer::COMPRESS);
 /* Already being called from above
 #ifdef ENABLE_PAGING
@@ -117,20 +136,21 @@ namespace cbt {
         }
 
         if (buffer_.empty()) {
-            for (curChild=0; curChild < children_.size(); curChild++) {
+            for (curChild = 0; curChild < children_.size(); curChild++) {
                 children_[curChild]->emptyOrCompress();
             }
         } else {
             checkSerializationIntegrity();
             Buffer::List* l = buffer_.lists_[0];
             // find the first separator strictly greater than the first element
-            while (l->hashes_[curElement] >= 
+            while (l->hashes_[curElement] >=
                     children_[curChild]->separator_) {
                 children_[curChild]->emptyOrCompress();
                 curChild++;
 #ifdef ENABLE_ASSERT_CHECKS
                 if (curChild >= children_.size()) {
-                    fprintf(stderr, "Node: %d: Can't place %u among children\n", id_, 
+                    fprintf(stderr,
+                            "Node: %d: Can't place %u among children\n", id_,
                             l->hashes_[curElement]);
                     checkIntegrity();
                     assert(false);
@@ -138,7 +158,7 @@ namespace cbt {
 #endif
             }
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Node: %d: first node chosen: %d (sep: %u,\
+            fprintf(stderr, "Node: %d: first node chosen: %d (sep: %u, \
                 child: %d); first element: %u\n", id_, children_[curChild]->id_,
                     children_[curChild]->separator_, curChild, l->hashes_[0]);
 #endif
@@ -148,7 +168,7 @@ namespace cbt {
             assert(buffer_.lists_.size() == 1);
 #endif
             while (curElement < num) {
-                if (l->hashes_[curElement] >= 
+                if (l->hashes_[curElement] >=
                         children_[curChild]->separator_) {
                     /* this separator is the largest separator that is not greater
                      * than *curHash. This invariant needs to be maintained.
@@ -166,14 +186,14 @@ namespace cbt {
 #endif
                         lastElement = curElement;
                     }
-                    // skip past all separators not greater than the current hash
-                    while (l->hashes_[curElement] 
+                    // skip past all separators not greater than current hash
+                    while (l->hashes_[curElement]
                             >= children_[curChild]->separator_) {
                         children_[curChild]->emptyOrCompress();
                         curChild++;
 #ifdef ENABLE_ASSERT_CHECKS
                         if (curChild >= children_.size()) {
-                            fprintf(stderr, "Can't place %u among children\n", 
+                            fprintf(stderr, "Can't place %u among children\n",
                                     l->hashes_[curElement]);
                             assert(false);
                         }
@@ -221,8 +241,7 @@ namespace cbt {
         return true;
     }
 
-    void Node::quicksort(uint32_t uleft, uint32_t uright)
-    {
+    void Node::quicksort(uint32_t uleft, uint32_t uright) {
         int32_t i, j, stack_pointer = -1;
         int32_t left = uleft;
         int32_t right = uright;
@@ -262,23 +281,57 @@ namespace cbt {
                 int median = (left + right) >> 1;
                 i = left + 1;
                 j = right;
-                swap = arr[median]; arr[median] = arr[i]; arr[i] = swap;
-                sizs = siz[median]; siz[median] = siz[i]; siz[i] = sizs;
-                pers = perm_[median]; perm_[median] = perm_[i]; perm_[i] = pers;
+
+                swap = arr[median];
+                arr[median] = arr[i];
+                arr[i] = swap;
+
+                sizs = siz[median];
+                siz[median] = siz[i];
+                siz[i] = sizs;
+
+                pers = perm_[median];
+                perm_[median] = perm_[i];
+                perm_[i] = pers;
+
                 if (arr[left] > arr[right]) {
-                    swap = arr[left]; arr[left] = arr[right]; arr[right] = swap;
-                    sizs = siz[left]; siz[left] = siz[right]; siz[right] = sizs;
-                    pers = perm_[left]; perm_[left] = perm_[right]; perm_[right] = pers;
+                    swap = arr[left];
+                    arr[left] = arr[right];
+                    arr[right] = swap;
+
+                    sizs = siz[left];
+                    siz[left] = siz[right];
+                    siz[right] = sizs;
+
+                    pers = perm_[left];
+                    perm_[left] = perm_[right];
+                    perm_[right] = pers;
                 }
                 if (arr[i] > arr[right]) {
-                    swap = arr[i]; arr[i] = arr[right]; arr[right] = swap;
-                    sizs = siz[i]; siz[i] = siz[right]; siz[right] = sizs;
-                    pers = perm_[i]; perm_[i] = perm_[right]; perm_[right] = pers;
+                    swap = arr[i];
+                    arr[i] = arr[right];
+                    arr[right] = swap;
+
+                    sizs = siz[i];
+                    siz[i] = siz[right];
+                    siz[right] = sizs;
+
+                    pers = perm_[i];
+                    perm_[i] = perm_[right];
+                    perm_[right] = pers;
                 }
                 if (arr[left] > arr[i]) {
-                    swap = arr[left]; arr[left] = arr[i]; arr[i] = swap;
-                    sizs = siz[left]; siz[left] = siz[i]; siz[i] = sizs;
-                    pers = perm_[left]; perm_[left] = perm_[i]; perm_[i] = pers;
+                    swap = arr[left];
+                    arr[left] = arr[i];
+                    arr[i] = swap;
+
+                    sizs = siz[left];
+                    siz[left] = siz[i];
+                    siz[i] = sizs;
+
+                    pers = perm_[left];
+                    perm_[left] = perm_[i];
+                    perm_[i] = pers;
                 }
                 temp = arr[i];
                 sizt = siz[i];
@@ -289,9 +342,17 @@ namespace cbt {
                     if (j < i) {
                         break;
                     }
-                    swap = arr[i]; arr[i] = arr[j]; arr[j] = swap;
-                    sizs = siz[i]; siz[i] = siz[j]; siz[j] = sizs;
-                    pers = perm_[i]; perm_[i] = perm_[j]; perm_[j] = pers;
+                    swap = arr[i];
+                    arr[i] = arr[j];
+                    arr[j] = swap;
+
+                    sizs = siz[i];
+                    siz[i] = siz[j];
+                    siz[j] = sizs;
+
+                    pers = perm_[i];
+                    perm_[i] = perm_[j];
+                    perm_[j] = pers;
                 }
                 arr[left + 1] = arr[j];
                 siz[left + 1] = siz[j];
@@ -309,19 +370,18 @@ namespace cbt {
                     left = i;
                 }
             }
-        } 
+        }
         delete[] rstack;
     }
 
-    bool Node::sortBuffer()
-    {
+    bool Node::sortBuffer() {
         if (buffer_.empty())
             return true;
         // initialize pointers to serialized PAOs
         uint32_t num = buffer_.numElements();
-        perm_ = (char**)malloc(sizeof(char*) * num);
+        perm_ = reinterpret_cast<char**>(malloc(sizeof(char*) * num));
         uint32_t offset = 0;
-        for (uint32_t i=0; i<num; i++) {
+        for (uint32_t i = 0; i < num; ++i) {
             perm_[i] = buffer_.lists_[0]->data_ + offset;
             offset += buffer_.lists_[0]->sizes_[i];
         }
@@ -332,8 +392,7 @@ namespace cbt {
         return true;
     }
 
-    bool Node::aggregateSortedBuffer()
-    {
+    bool Node::aggregateSortedBuffer() {
         // initialize auxiliary buffer
         Buffer aux;
         Buffer::List* a = aux.addList();
@@ -341,17 +400,18 @@ namespace cbt {
         // aggregate elements in buffer
         uint32_t lastIndex = 0;
         Buffer::List* l = buffer_.lists_[0];
-        for (uint32_t i=1; i<l->num_; i++) {
+        for (uint32_t i = 1; i < l->num_; ++i) {
             if (l->hashes_[i] == l->hashes_[lastIndex]) {
                 // aggregate elements
                 if (i == lastIndex + 1) {
-                    if (!(tree_->ops->deserialize(lastPAO, perm_[lastIndex], 
+                    if (!(tree_->ops->deserialize(lastPAO, perm_[lastIndex],
                             l->sizes_[lastIndex]))) {
                         fprintf(stderr, "Error at index %d\n", i);
                         assert(false);
                     }
                 }
-                assert(tree_->ops->deserialize(thisPAO, perm_[i], l->sizes_[i]));
+                assert(tree_->ops->deserialize(thisPAO, perm_[i],
+                        l->sizes_[i]));
                 if (tree_->ops->sameKey(thisPAO, lastPAO)) {
                     tree_->ops->merge(lastPAO, thisPAO);
 #ifdef ENABLE_COUNTERS
@@ -369,7 +429,7 @@ namespace cbt {
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
 //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
                 memmove(a->data_ + a->size_,
-                        (void*)(perm_[lastIndex]),
+                        reinterpret_cast<void*>(perm_[lastIndex]),
                         l->sizes_[lastIndex]);
                 a->size_ += l->sizes_[lastIndex];
             } else {
@@ -391,9 +451,9 @@ namespace cbt {
             a->hashes_[a->num_] = l->hashes_[lastIndex];
             // the size wouldn't have changed
             a->sizes_[a->num_] = l->sizes_[lastIndex];
-            //memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
             memmove(a->data_ + a->size_,
-                    (void*)(perm_[lastIndex]),
+                    reinterpret_cast<void*>(perm_[lastIndex]),
                     l->sizes_[lastIndex]);
             a->size_ += l->sizes_[lastIndex];
         } else {
@@ -419,9 +479,8 @@ namespace cbt {
         return true;
     }
 
-    bool Node::mergeBuffer()
-    {
-        std::priority_queue<Node::MergeElement, 
+    bool Node::mergeBuffer() {
+        std::priority_queue<Node::MergeElement,
                 std::vector<Node::MergeElement>,
                 MergeComparator> queue;
 
@@ -439,7 +498,7 @@ namespace cbt {
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
-        for (uint32_t i=0; i<buffer_.lists_.size(); i++) {
+        for (uint32_t i = 0; i < buffer_.lists_.size(); ++i) {
             if (buffer_.lists_[i]->num_ > 0) {
                 Node::MergeElement* mge = new Node::MergeElement(
                         buffer_.lists_[i]);
@@ -455,9 +514,9 @@ namespace cbt {
             a->hashes_[a->num_] = n.hash();
             uint32_t buf_size = n.size();
             a->sizes_[a->num_] = buf_size;
-            //memset(a->data_ + a->size_, 0, buf_size);
+            // memset(a->data_ + a->size_, 0, buf_size);
             memmove(a->data_ + a->size_,
-                    (void*)n.data(), buf_size);
+                    reinterpret_cast<void*>(n.data()), buf_size);
             a->size_ += buf_size;
             a->num_++;
 /*
@@ -482,8 +541,7 @@ namespace cbt {
         return true;
     }
 
-    bool Node::aggregateMergedBuffer()
-    {
+    bool Node::aggregateMergedBuffer() {
         if (buffer_.empty())
             return true;
         // initialize aux buffer
@@ -504,11 +562,11 @@ namespace cbt {
         uint32_t lastOffset = 0;
 
         // aggregate elements in buffer
-        for (uint32_t i=1; i<num; i++) {
+        for (uint32_t i = 1; i < num; ++i) {
             if (l->hashes_[i] == l->hashes_[lastIndex]) {
                 if (numMerged == 0) {
-                    if (!(tree_->ops->deserialize(lastPAO, l->data_ + lastOffset,
-                            l->sizes_[lastIndex]))) {
+                    if (!(tree_->ops->deserialize(lastPAO,
+                            l->data_ + lastOffset, l->sizes_[lastIndex]))) {
                         fprintf(stderr, "Can't deserialize at %u, index: %u\n",
                                 lastOffset, lastIndex);
                         assert(false);
@@ -535,9 +593,10 @@ namespace cbt {
             if (numMerged == 0) {
                 uint32_t buf_size = l->sizes_[lastIndex];
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
-                //memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
                 memmove(a->data_ + a->size_,
-                        (void*)(l->data_ + lastOffset), l->sizes_[lastIndex]);
+                        reinterpret_cast<void*>(l->data_ + lastOffset),
+                        l->sizes_[lastIndex]);
                 a->size_ += buf_size;
             } else {
                 uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
@@ -556,9 +615,10 @@ namespace cbt {
         if (numMerged == 0) {
             uint32_t buf_size = l->sizes_[lastIndex];
             a->sizes_[a->num_] = l->sizes_[lastIndex];
-            //memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
             memmove(a->data_ + a->size_,
-                    (void*)(l->data_ + lastOffset), l->sizes_[lastIndex]);
+                    reinterpret_cast<void*>(l->data_ + lastOffset),
+                    l->sizes_[lastIndex]);
             a->size_ += buf_size;
         } else {
             uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
@@ -571,7 +631,7 @@ namespace cbt {
         fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
                 buffer_.numElements(), aux.numElements());
 #endif
-        
+
         // clear buffer and copy over aux.
         // aux itself is on the stack and will be destroyed
         buffer_.deallocate();
@@ -584,8 +644,7 @@ namespace cbt {
     /* A leaf is split by moving half the elements of the buffer into a
      * new leaf and inserting a median value as the separator element into the
      * parent */
-    Node* Node::splitLeaf()
-    {
+    Node* Node::splitLeaf() {
         checkIntegrity();
 
         // select splitting index
@@ -597,7 +656,7 @@ namespace cbt {
 #ifdef ENABLE_ASSERT_CHECKS
             if (splitIndex == num) {
                 assert(false);
-            }                
+            }
 #endif
         }
 
@@ -622,8 +681,8 @@ namespace cbt {
         checkIntegrity();
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d splits to Node %d: new indices: %u and\
-                %u; new separators: %u and %u\n", id_, newLeaf->id_, 
-                l->num_, newLeaf->buffer_.lists_[0]->num_, separator_, 
+                %u; new separators: %u and %u\n", id_, newLeaf->id_,
+                l->num_, newLeaf->buffer_.lists_[0]->num_, separator_,
                 newLeaf->separator_);
 #endif
 
@@ -640,39 +699,38 @@ namespace cbt {
         return newLeaf;
     }
 
-    bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index, 
-            uint32_t num)
-    {
+    bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
+            uint32_t num) {
         // check if the node is still queued up for a previous compression
         waitForCompressAction(Buffer::COMPRESS);
 
         // calculate offset
         uint32_t offset = 0;
         uint32_t num_bytes = 0;
-        for (uint32_t i=0; i<index; i++) {
+        for (uint32_t i = 0; i < index; ++i) {
             offset += parent_list->sizes_[i];
         }
-        for (uint32_t i=0; i<num; i++) {
+        for (uint32_t i = 0; i < num; ++i) {
             num_bytes += parent_list->sizes_[index + i];
         }
 #ifdef ENABLE_ASSERT_CHECKS
         assert(parent_list->state_ == Buffer::List::DECOMPRESSED);
         if (num_bytes >= BUFFER_SIZE) {
-            fprintf(stderr, "Node: %d, buf: %d\n", id_, 
-                    num_bytes); 
+            fprintf(stderr, "Node: %d, buf: %d\n", id_,
+                    num_bytes);
             assert(false);
         }
 #endif
         // allocate a new List in the buffer and copy data into it
         Buffer::List* l = buffer_.addList();
-        //memset(l->hashes_, 0, num * sizeof(uint32_t));
+        // memset(l->hashes_, 0, num * sizeof(uint32_t));
         memmove(l->hashes_, parent_list->hashes_ + index,
                 num * sizeof(uint32_t));
-        //memset(l->sizes_, 0, num * sizeof(uint32_t));
+        // memset(l->sizes_, 0, num * sizeof(uint32_t));
         memmove(l->sizes_, parent_list->sizes_ + index,
                 num * sizeof(uint32_t));
-        //memset(l->data_, 0, num_bytes);
-        memmove(l->data_, parent_list->data_ + offset, 
+        // memset(l->data_, 0, num_bytes);
+        memmove(l->data_, parent_list->data_ + offset,
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;
@@ -680,14 +738,13 @@ namespace cbt {
         return true;
     }
 
-    bool Node::addChild(Node* newNode)   
-    {
+    bool Node::addChild(Node* newNode) {
         uint32_t i;
         // insert separator value
 
         // find position of insertion
         std::vector<Node*>::iterator it = children_.begin();
-        for (i=0; i<children_.size(); i++) {
+        for (i = 0; i < children_.size(); ++i) {
             if (newNode->separator_ > children_[i]->separator_)
                 continue;
             break;
@@ -695,9 +752,9 @@ namespace cbt {
         it += i;
         children_.insert(it, newNode);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node: %d: Node %d added at pos %u, [", id_, 
+        fprintf(stderr, "Node: %d: Node %d added at pos %u, [", id_,
                 newNode->id_, i);
-        for (uint32_t j=0; j<children_.size(); j++)
+        for (uint32_t j = 0; j < children_.size(); ++j)
             fprintf(stderr, "%d, ", children_[j]->id_);
         fprintf(stderr, "], num children: %ld\n", children_.size());
 #endif
@@ -707,8 +764,7 @@ namespace cbt {
         return true;
     }
 
-    bool Node::splitNonLeaf()
-    {
+    bool Node::splitNonLeaf() {
         // ensure node's buffer is empty
 #ifdef ENABLE_ASSERT_CHECKS
         if (!buffer_.empty()) {
@@ -721,18 +777,18 @@ namespace cbt {
         // move the last floor((b+1)/2) children to new node
         int newNodeChildIndex = children_.size()-(tree_->b_+1)/2;
 #ifdef ENABLE_ASSERT_CHECKS
-        if (children_[newNodeChildIndex]->separator_ <= 
+        if (children_[newNodeChildIndex]->separator_ <=
                 children_[newNodeChildIndex-1]->separator_) {
-            fprintf(stderr, "%d sep is %u and %d sep is %u\n", 
-                    newNodeChildIndex, 
-                    children_[newNodeChildIndex]->separator_, 
+            fprintf(stderr, "%d sep is %u and %d sep is %u\n",
+                    newNodeChildIndex,
+                    children_[newNodeChildIndex]->separator_,
                     newNodeChildIndex-1,
                     children_[newNodeChildIndex-1]->separator_);
             assert(false);
         }
 #endif
         // add children to new node
-        for (uint32_t i=newNodeChildIndex; i<children_.size(); i++) {
+        for (uint32_t i = newNodeChildIndex; i < children_.size(); ++i) {
             newNode->children_.push_back(children_[i]);
             children_[i]->parent_ = newNode;
         }
@@ -740,7 +796,7 @@ namespace cbt {
         newNode->separator_ = separator_;
 
         // remove children from current node
-        std::vector<Node*>::iterator it = children_.begin() + 
+        std::vector<Node*>::iterator it = children_.begin() +
                 newNodeChildIndex;
         children_.erase(it, children_.end());
 
@@ -748,18 +804,18 @@ namespace cbt {
         separator_ = children_[children_.size()-1]->separator_;
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "After split, %d: [", id_);
-        for (uint32_t j=0; j<children_.size(); j++)
+        for (uint32_t j = 0; j < children_.size(); ++j)
             fprintf(stderr, "%u, ", children_[j]->separator_);
         fprintf(stderr, "] and %d: [", newNode->id_);
-        for (uint32_t j=0; j<newNode->children_.size(); j++)
+        for (uint32_t j = 0; j < newNode->children_.size(); ++j)
             fprintf(stderr, "%u, ", newNode->children_[j]->separator_);
         fprintf(stderr, "]\n");
 
         fprintf(stderr, "Children, %d: [", id_);
-        for (uint32_t j=0; j<children_.size(); j++)
+        for (uint32_t j = 0; j < children_.size(); ++j)
             fprintf(stderr, "%d, ", children_[j]->id_);
         fprintf(stderr, "] and %d: [", newNode->id_);
-        for (uint32_t j=0; j<newNode->children_.size(); j++)
+        for (uint32_t j = 0; j < newNode->children_.size(); ++j)
             fprintf(stderr, "%d, ", newNode->children_[j]->id_);
         fprintf(stderr, "]\n");
 #endif
@@ -772,29 +828,27 @@ namespace cbt {
             buffer_.deallocate();
             buffer_.clear();
             return tree_->createNewRoot(newNode);
-        } else
+        } else {
             return parent_->addChild(newNode);
+        }
     }
 
-    bool Node::isFull() const
-    {
+    bool Node::isFull() const {
         if (buffer_.numElements() > EMPTY_THRESHOLD)
             return true;
         return false;
     }
 
-    uint32_t Node::level() const
-    {
+    uint32_t Node::level() const {
         return level_;
     }
 
-    uint32_t Node::id() const
-    {
+    uint32_t Node::id() const {
         return id_;
     }
 
-    void Node::scheduleBufferCompressAction(const Buffer::CompressionAction& act)
-    {
+    void Node::scheduleBufferCompressAction(const Buffer::CompressionAction&
+            act) {
         if (!buffer_.compressible_) {
             fprintf(stderr, "Node %d not compressible\n", id_);
             return;
@@ -811,25 +865,21 @@ namespace cbt {
             tree_->compressor_->wakeup();
         }
     }
-    
-    void Node::waitForCompressAction(const Buffer::CompressionAction& act)
-    {
+
+    void Node::waitForCompressAction(const Buffer::CompressionAction& act) {
         buffer_.waitForCompressAction(act);
     }
 
-    void Node::performCompressAction()
-    {
+    void Node::performCompressAction() {
         buffer_.performCompressAction();
     }
 
-    Buffer::CompressionAction Node::getCompressAction()
-    {
+    Buffer::CompressionAction Node::getCompressAction() {
         return buffer_.getCompressAction();
     }
 
 #ifdef ENABLE_PAGING
-    void Node::scheduleBufferPageAction(const Buffer::PageAction& act)
-    {
+    void Node::scheduleBufferPageAction(const Buffer::PageAction& act)  {
         if (!buffer_.pageable_) {
             fprintf(stderr, "Node %d not pageable\n", id_);
             return;
@@ -847,13 +897,11 @@ namespace cbt {
         }
     }
 
-    void Node::waitForPageAction(const Buffer::PageAction& act)
-    {
+    void Node::waitForPageAction(const Buffer::PageAction& act) {
         buffer_.waitForPageAction(act);
     }
 
-    bool Node::performPageAction()
-    {
+    bool Node::performPageAction() {
         bool ret = buffer_.performPageAction();
 #ifdef CT_NODE_DEBUG
         if (ret) {
@@ -867,25 +915,25 @@ namespace cbt {
         return ret;
     }
 
-    Buffer::PageAction Node::getPageAction()
-    {
+    Buffer::PageAction Node::getPageAction() {
         return buffer_.getPageAction();
     }
-#endif // ENABLE_PAGING
+#endif  // ENABLE_PAGING
 
-    bool Node::checkSerializationIntegrity(int listn/*=-1*/)
-    {
+    bool Node::checkSerializationIntegrity(int listn  /* =-1*/) {
 #if 0
         uint32_t offset;
         PartialAgg* pao;
         tree_->createPAO_(NULL, &pao);
         if (listn < 0) {
-            for (uint32_t j=0; j<buffer_.lists_.size(); j++) {
+            for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {
                 Buffer::List* l = buffer_.lists_[j];
                 offset = 0;
-                for (uint32_t i=0; i<l->num_; i++) {
-                    if (!((ProtobufPartialAgg*)pao)->deserialize(l->data_ + offset, l->sizes_[i])) {
-                        fprintf(stderr, "Error in list %u, index %u, offset %u\n",
+                for (uint32_t i = 0; i < l->num_; ++i) {
+                    if (!(static_cast<ProtobufPartialAgg*>(pao)->deserialize(
+                            l->data_ + offset, l->sizes_[i])) {
+                        fprintf(stderr,
+                                "Error in list %u, index %u, offset %u\n",
                                 j, i, offset);
                         assert(false);
                     }
@@ -895,8 +943,9 @@ namespace cbt {
         } else {
             Buffer::List* l = buffer_.lists_[listn];
             offset = 0;
-            for (uint32_t i=0; i<l->num_; i++) {
-                if (!((ProtobufPartialAgg*)pao)->deserialize(l->data_ + offset, l->sizes_[i])) {
+            for (uint32_t i = 0; i < l->num_; ++i) {
+                if (!(static_cast<ProtobufPartialAgg*>(pao)->deserialize(
+                        l->data_ + offset, l->sizes_[i])) {
                     fprintf(stderr, "Error in list %u, index %u, offset %u\n",
                             listn, i, offset);
                     assert(false);
@@ -909,15 +958,14 @@ namespace cbt {
         return true;
     }
 
-    bool Node::checkIntegrity()
-    {
+    bool Node::checkIntegrity() {
 #ifdef ENABLE_INTEGRITY_CHECK
         uint32_t offset;
         uint32_t* curHash;
         offset = 0;
-        for (uint32_t j=0; j<buffer_.lists_.size(); j++) {
+        for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {
             Buffer::List* l = buffer_.lists_[j];
-            for (uint32_t i=0; i<l->num_-1; i++) {
+            for (uint32_t i = 0; i < l->num_-1; ++i) {
                 if (l->hashes_[i] > l->hashes_[i+1]) {
                     fprintf(stderr, "Node: %d, List: %d: Hash %u at index %u\
                             greater than hash %u at %u (size: %u)\n", id_, j,
@@ -926,15 +974,16 @@ namespace cbt {
                     assert(false);
                 }
             }
-            for (uint32_t i=0; i<l->num_; i++) {
+            for (uint32_t i = 0; i < l->num_; ++i) {
                 if (l->sizes_[i] == 0) {
-                    fprintf(stderr, "Element %u in list %u has 0 size; tot size: %u\n", i, j, l->num_);
+                    fprintf(stderr, "Element %u in list %u has 0 size; tot\
+                            size: %u\n", i, j, l->num_);
                     assert(false);
                 }
             }
             if (l->hashes_[l->num_-1] >= separator_) {
                 fprintf(stderr, "Node: %d: Hash %u at index %u\
-                        greater than separator %u\n", id_, 
+                        greater than separator %u\n", id_,
                         l->hashes_[l->num_-1], l->num_-1, separator_);
                 assert(false);
             }
