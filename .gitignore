@@ -17,3 +17,6 @@
 # SCons temp files
 *.dblite
 *.os
+
+# Test binaries
+test/testcbt
