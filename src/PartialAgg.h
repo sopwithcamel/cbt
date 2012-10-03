@@ -23,6 +23,7 @@
 
 #ifndef SRC_PARTIALAGG_H_
 #define SRC_PARTIALAGG_H_
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,8 +42,8 @@ class Token;
 class PartialAgg {
   protected:
     /* don't allow PartialAgg objects to be created */
-    PartialAgg() {}
-    ~PartialAgg() {}
+    PartialAgg();
+    ~PartialAgg();
 };
 
 class Operations {
@@ -55,6 +56,7 @@ class Operations {
         BOOST,
         HAND
     };
+    Operations();
     virtual ~Operations() = 0;
     virtual const char* getKey(PartialAgg* p) const = 0;
     virtual bool setKey(PartialAgg* p, char* k) const = 0;
