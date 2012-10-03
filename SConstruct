@@ -32,7 +32,8 @@ env.Append(CCFLAGS = ['-g','-O2','-Wall'],
 cbtlib = env.SharedLibrary('cbt', src_files)
 
 test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
-testapp = env.Program('test/testcbt', test_files)
+testapp = env.Program('test/testcbt', test_files,
+            LIBS = ['-lgtest', '-lprotobuf', '-lpthread', '-lcbt', '-lsnappy'])
 
 ## Targets
 # build targets
