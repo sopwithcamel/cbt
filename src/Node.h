@@ -40,6 +40,16 @@ namespace cbt {
     class Compressor;
     class Sorter;
 
+    enum Action {
+        NONE,
+        DECOMPRESS,
+        COMPRESS,
+        SORT,
+        EMPTY,
+        PAGEOUT,
+        PAGEIN
+    };
+
     class Node {
         friend class CompressTree;
         friend class Buffer;
@@ -47,6 +57,7 @@ namespace cbt {
         friend class Emptier;
         friend class Sorter;
         friend class Pager;
+        friend class Slave;
 
         class MergeElement {
           public:
@@ -104,6 +115,8 @@ namespace cbt {
         /* Buffer handling functions */
 
         bool emptyOrCompress();
+        /* Responsible for handling the spilling of the buffer. */
+        bool spillBuffer();
         /* Function: empty the buffer into the buffers in the next level.
          *  + Must be called with buffer decompressed.
          *  + Buffer will be freed after invocation.
@@ -148,18 +161,24 @@ namespace cbt {
 
         /* Sorting-related functions */
         void quicksort(uint32_t left, uint32_t right);
-        void waitForSort();
 
+        void schedule(const Action& act);
+        Action getQueueStatus();
+        void setQueueStatus(const Action& act);
         /* Compression-related functions */
-        void scheduleBufferCompressAction(const Buffer::CompressionAction& act);
-        void waitForCompressAction(const Buffer::CompressionAction& act);
+
+        // return value indicates whether the node needs to be added or
+        // if it's already present in the queue
+        bool checkCompress();
+        bool checkDecompress();
+
+        void wait(const Action& act);
         void performCompressAction();
         Buffer::CompressionAction getCompressAction();
 
 #ifdef ENABLE_PAGING
         /* Paging-related functions */
         void scheduleBufferPageAction(const Buffer::PageAction& act);
-        void waitForPageAction(const Buffer::PageAction& act);
         bool performPageAction();
         Buffer::PageAction getPageAction();
 #endif  // ENABLE_PAGING
@@ -179,10 +198,22 @@ namespace cbt {
         std::vector<Node*> children_;
         uint32_t separator_;
 
-        /* Emptying related */
-        bool queuedForEmptying_;
-        pthread_mutex_t queuedForEmptyMutex_;
-        char** perm_;
+        // Queueing related status, condition variables and mutexes
+        enum Action queueStatus_;
+        pthread_spinlock_t queueStatusLock_;
+
+        // sort
+        pthread_cond_t sortCond_;
+        pthread_mutex_t sortMutex_; 
+
+        pthread_cond_t compCond_;
+        pthread_mutex_t compMutex_;
+
+#ifdef ENABLE_PAGING
+        PageAction pageAct_;
+        pthread_cond_t pageCond_;
+        pthread_mutex_t pageMutex_;
+#endif  // ENABLE_PAGING
     };
 }
 

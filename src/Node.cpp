@@ -98,14 +98,21 @@ namespace cbt {
     }
 
     bool Node::emptyOrCompress() {
+        bool ret;
         if (tree_->emptyType_ == ALWAYS || isFull()) {
-            scheduleBufferCompressAction(Buffer::DECOMPRESS);
-            tree_->sorter_->addNode(this);
-            tree_->sorter_->wakeup();
+            ret = spillBuffer();
         } else {
-            scheduleBufferCompressAction(Buffer::COMPRESS);
+            ret = schedule(COMPRESS);
         }
-        return true;
+        return ret;
+    }
+
+    bool Node::spillBuffer() {
+#ifdef ENABLE_PAGING
+        schedule(PAGEIN);
+#elif
+        schedule(DECOMPRESS);
+#endif
     }
 
     bool Node::emptyBuffer() {
@@ -241,155 +248,15 @@ namespace cbt {
         return true;
     }
 
-    void Node::quicksort(uint32_t uleft, uint32_t uright) {
-        int32_t i, j, stack_pointer = -1;
-        int32_t left = uleft;
-        int32_t right = uright;
-        int32_t* rstack = new int32_t[128];
-        uint32_t swap, temp;
-        uint32_t sizs, sizt;
-        char *pers, *pert;
-        uint32_t* arr = buffer_.lists_[0]->hashes_;
-        uint32_t* siz = buffer_.lists_[0]->sizes_;
-        while (true) {
-            if (right - left <= 7) {
-                for (j = left + 1; j <= right; j++) {
-                    swap = arr[j];
-                    sizs = siz[j];
-                    pers = perm_[j];
-                    i = j - 1;
-                    if (i < 0) {
-                        fprintf(stderr, "Noo");
-                        assert(false);
-                    }
-                    while (i >= left && (arr[i] > swap)) {
-                        arr[i + 1] = arr[i];
-                        siz[i + 1] = siz[i];
-                        perm_[i + 1] = perm_[i];
-                        i--;
-                    }
-                    arr[i + 1] = swap;
-                    siz[i + 1] = sizs;
-                    perm_[i + 1] = pers;
-                }
-                if (stack_pointer == -1) {
-                    break;
-                }
-                right = rstack[stack_pointer--];
-                left = rstack[stack_pointer--];
-            } else {
-                int median = (left + right) >> 1;
-                i = left + 1;
-                j = right;
+    bool Node::sortBuffer {
+        bool ret = buffer_.sort();
 
-                swap = arr[median];
-                arr[median] = arr[i];
-                arr[i] = swap;
-
-                sizs = siz[median];
-                siz[median] = siz[i];
-                siz[i] = sizs;
-
-                pers = perm_[median];
-                perm_[median] = perm_[i];
-                perm_[i] = pers;
-
-                if (arr[left] > arr[right]) {
-                    swap = arr[left];
-                    arr[left] = arr[right];
-                    arr[right] = swap;
-
-                    sizs = siz[left];
-                    siz[left] = siz[right];
-                    siz[right] = sizs;
-
-                    pers = perm_[left];
-                    perm_[left] = perm_[right];
-                    perm_[right] = pers;
-                }
-                if (arr[i] > arr[right]) {
-                    swap = arr[i];
-                    arr[i] = arr[right];
-                    arr[right] = swap;
-
-                    sizs = siz[i];
-                    siz[i] = siz[right];
-                    siz[right] = sizs;
-
-                    pers = perm_[i];
-                    perm_[i] = perm_[right];
-                    perm_[right] = pers;
-                }
-                if (arr[left] > arr[i]) {
-                    swap = arr[left];
-                    arr[left] = arr[i];
-                    arr[i] = swap;
-
-                    sizs = siz[left];
-                    siz[left] = siz[i];
-                    siz[i] = sizs;
-
-                    pers = perm_[left];
-                    perm_[left] = perm_[i];
-                    perm_[i] = pers;
-                }
-                temp = arr[i];
-                sizt = siz[i];
-                pert = perm_[i];
-                while (true) {
-                    while (arr[++i] < temp);
-                    while (arr[--j] > temp);
-                    if (j < i) {
-                        break;
-                    }
-                    swap = arr[i];
-                    arr[i] = arr[j];
-                    arr[j] = swap;
-
-                    sizs = siz[i];
-                    siz[i] = siz[j];
-                    siz[j] = sizs;
-
-                    pers = perm_[i];
-                    perm_[i] = perm_[j];
-                    perm_[j] = pers;
-                }
-                arr[left + 1] = arr[j];
-                siz[left + 1] = siz[j];
-                perm_[left + 1] = perm_[j];
-                arr[j] = temp;
-                siz[j] = sizt;
-                perm_[j] = pert;
-                if (right - i + 1 >= j - left) {
-                    rstack[++stack_pointer] = i;
-                    rstack[++stack_pointer] = right;
-                    right = j - 1;
-                } else {
-                    rstack[++stack_pointer] = left;
-                    rstack[++stack_pointer] = j - 1;
-                    left = i;
-                }
-            }
-        }
-        delete[] rstack;
-    }
-
-    bool Node::sortBuffer() {
-        if (buffer_.empty())
-            return true;
-        // initialize pointers to serialized PAOs
-        uint32_t num = buffer_.numElements();
-        perm_ = reinterpret_cast<char**>(malloc(sizeof(char*) * num));
-        uint32_t offset = 0;
-        for (uint32_t i = 0; i < num; ++i) {
-            perm_[i] = buffer_.lists_[0]->data_ + offset;
-            offset += buffer_.lists_[0]->sizes_[i];
-        }
-
-        // quicksort elements
-        quicksort(0, num - 1);
-        checkIntegrity();
-        return true;
+        // Signal that we're done sorting
+        pthread_mutex_lock(&sortMutex_);
+        queuedForSort_ = false;
+        pthread_cond_signal(&sortCond_);
+        pthread_mutex_unlock(&sortMutex_);
+        return ret;
     }
 
     bool Node::aggregateSortedBuffer() {
@@ -702,7 +569,7 @@ namespace cbt {
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
             uint32_t num) {
         // check if the node is still queued up for a previous compression
-        waitForCompressAction(Buffer::COMPRESS);
+        wait(COMPRESS);
 
         // calculate offset
         uint32_t offset = 0;
@@ -847,31 +714,175 @@ namespace cbt {
         return id_;
     }
 
-    void Node::scheduleBufferCompressAction(const Buffer::CompressionAction&
-            act) {
-        if (!buffer_.compressible_) {
-            fprintf(stderr, "Node %d not compressible\n", id_);
-            return;
+    Action Node::getQueueStatus() {
+        pthread_spin_lock(&queueStatusLock_);
+        Action ret = queueStatus_;
+        pthread_spin_unlock(&queueStatusLock_);
+        return ret;
+    }
+
+    void Node::setQueueStatus(const Action& act) {
+        pthread_spin_lock(&queueStatusLock_);
+        queueStatus_ = act;
+        pthread_spin_unlock(&queueStatusLock_);
+    }
+
+    void Node::schedule(const Action& act) {
+        if (act == COMPRESS || act == DECOMPRESS) {
+            bool add;
+            if (!buffer_.compressible_) {
+                fprintf(stderr, "Node %d not compressible\n", id_);
+                return;
+            }
+            if (act == COMPRESS) {
+                // check if node has to be added on queue
+                add = checkCompress();
+            } else if (act == DECOMPRESS) {
+                // check if node has to be added on queue
+                add = checkDecompress();
+            } else {
+                assert(false && "Invalid compress action");
+            }
+
+            if (add) {
+                tree_->compressor_->addNode(this);
+                tree_->compressor_->wakeup();
+            }
+        } else if ()
+    }
+
+    bool Node::checkCompress() {
+        bool ret;
+        Action act = getQueueStatus();
+        if (empty()) {
+            // nothing to be done
+            setQueueStatus_(NONE);
+            ret = false;
+        } else if (act == DECOMPRESS) {
+            // check if node already queued as DECOMPRESS. This shouldn't
+            // happen.
+            fprintf(stderr, "Node %d trying to be compressed while\
+                    waiting for decompression\n", node_->id());
+            assert(false);
+        } else if (act == COMPRESS) {
+            // previous list queued for compression hasn't been compressed
+            // yet. No need to add node again
+            ret = false;
+        } else {
+            // Node not present
+            setQueueStatus(COMPRESS);
+            ret = true;
         }
-        bool add;
-        if (act == Buffer::COMPRESS)
-            add = buffer_.checkCompress();
-        else if (act == Buffer::DECOMPRESS)
-            add = buffer_.checkDecompress();
-        else
-            assert(false && "Invalid compress action");
-        if (add) {
-            tree_->compressor_->addNode(this);
-            tree_->compressor_->wakeup();
+        return ret;
+    }
+
+    bool Node::checkDecompress() {
+        Action act = getQueueStatus();
+        if (empty()) {
+            setQueueStatus(NONE);
+            ret = false;
+        } else if (act == COMPRESS) {
+            // check if compression request is outstanding and cancel this */
+            setQueueStatus(DECOMPRESS);
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d reset to decompress\n", node_->id_);
+#endif
+            ret = false;
+        } else if (act == DECOMPRESS) {
+            // we're decompressing twice
+            fprintf(stderr, "decompressing node %d twice", node_->id_);
+            assert(false);
+        } else { // NONE
+            setQueueStatus(DECOMPRESS);
+            ret = true;
+        }
+        return ret;
+    }
+
+    void Node::wait(const Action& act) {
+        switch (act) {
+            case COMPRESS:
+            case DECOMPRESS:
+                {
+                    pthread_mutex_lock(&compMutex_);
+                    while (getQueueStatus() == act)
+                        pthread_cond_wait(&compCond_, &compMutex_);
+                    pthread_mutex_unlock(&compMutex_);
+                }
+                break;
+            case SORT:
+                {
+                    pthread_mutex_lock(&sortMutex_);
+                    while (getQueueStatus() == act)
+                        pthread_cond_wait(&sortCond_, &sortMutex_);
+                    pthread_mutex_unlock(&sortMutex_);
+                }
+                break;
+            case EMPTY:
+                {
+                    pthread_mutex_lock(&emptyMutex_);
+                    while (getQueueStatus() == act)
+                        pthread_cond_wait(&emptyCond_, &emptyMutex_);
+                    pthread_mutex_unlock(&emptyMutex_);
+                }
+                break;
+#ifdef ENABLE_PAGING
+            case PAGEIN:
+            case PAGEOUT:
+                {
+                    pthread_mutex_lock(&pageMutex_);
+                    while (getQueueStatus() == act)
+                        pthread_cond_wait(&pageCond_, &pageMutex_);
+                    pthread_mutex_unlock(&pageMutex_);
+                }
+                break;
+#endif
         }
     }
 
-    void Node::waitForCompressAction(const Buffer::CompressionAction& act) {
-        buffer_.waitForCompressAction(act);
-    }
+    void Node::perform() {
+        bool ret;
+        Action act = getQueueStatus();
+        switch (act) {
+            case COMPRESS:
+            case DECOMPRESS:
+                {
+                    if (act == COMPRESS) {
+                        compress();
+                    } else if (act == DECOMPRESS) {
+#ifdef ENABLE_PAGING
+                        wait(PAGE_IN);
+#endif
+                        decompress();
+                    }
 
-    void Node::performCompressAction() {
-        buffer_.performCompressAction();
+                    // signal
+                    pthread_mutex_unlock(&compMutex_);
+                    pthread_cond_signal(&compCond_);
+                    pthread_mutex_unlock(&compActMutex_);
+
+                    // add node to sorter
+                    tree_->sorter_->addNode(this);
+                    tree_->sorter_->wakeup();
+                }
+                break;
+#ifdef ENABLE_PAGING
+            case PAGEIN:
+            case PAGEOUT:
+                {
+                    ret = buffer_.performPageAction();
+#ifdef CT_NODE_DEBUG
+                    if (ret) {
+                        Buffer::PageAction act = getPageAction();
+                        if (act == Buffer::PAGE_OUT)
+                            fprintf(stderr, "pager: paged out node: %d\n", id_);
+                        else if (act == Buffer::PAGE_IN)
+                            fprintf(stderr, "pager: paged in node: %d\n", id_);
+                    }
+                }
+#endif
+        }
+        return ret;
     }
 
     Buffer::CompressionAction Node::getCompressAction() {
@@ -897,22 +908,7 @@ namespace cbt {
         }
     }
 
-    void Node::waitForPageAction(const Buffer::PageAction& act) {
-        buffer_.waitForPageAction(act);
-    }
-
     bool Node::performPageAction() {
-        bool ret = buffer_.performPageAction();
-#ifdef CT_NODE_DEBUG
-        if (ret) {
-            Buffer::PageAction act = getPageAction();
-            if (act == Buffer::PAGE_OUT)
-                fprintf(stderr, "pager: paged out node: %d\n", id_);
-            else if (act == Buffer::PAGE_IN)
-                fprintf(stderr, "pager: paged in node: %d\n", id_);
-        }
-#endif
-        return ret;
     }
 
     Buffer::PageAction Node::getPageAction() {

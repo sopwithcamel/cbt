@@ -58,9 +58,13 @@ namespace cbt {
             bool wakeup();
 
             uint32_t index_;
-            pthread_t* thread_;
+            pthread_t thread_;
             pthread_cond_t hasWork_;
             pthread_mutex_t mutex_;
+          private:
+            // disable copying and assignment
+            ThreadStruct(const ThreadStruct& rhs);
+            ThreadStruct& operator=(const ThreadStruct& rhs);
         };
 
         // used to pass arguments to pthread execute function
@@ -101,7 +105,7 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
         // Debugging
         virtual std::string getSlaveName() const = 0;
-        virtual void printElements() const;
+        virtual void printElements();
 #endif  // CT_NODE_DEBUG
 
         CompressTree* const tree_;
@@ -111,7 +115,7 @@ namespace cbt {
         bool askForCompletionNotice_;
 
         uint32_t numThreads_;
-        std::vector<ThreadStruct> threads_;
+        std::vector<ThreadStruct*> threads_;
 
         pthread_spinlock_t maskLock_;
         uint64_t tmask_;
@@ -143,7 +147,10 @@ namespace cbt {
         void addNode(Node* node);
 
       protected:
+        bool empty();
         virtual Node* getNextNode(bool fromHead = true);
+        virtual std::string getSlaveName() const;
+        void printElements();
 
       private:
         friend class CompressTree;
@@ -159,6 +166,9 @@ namespace cbt {
         void work(Node* n);
         void addNode(Node* node);
 
+      protected:
+        virtual std::string getSlaveName() const;
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -170,6 +180,9 @@ namespace cbt {
         ~Sorter();
         void work(Node* n);
         void addNode(Node* node);
+
+      protected:
+        virtual std::string getSlaveName() const;
 
       private:
         friend class CompressTree;
@@ -183,6 +196,9 @@ namespace cbt {
         void work(Node* n);
         void addNode(Node* node);
 
+      protected:
+        virtual std::string getSlaveName() const;
+
       private:
         friend class CompressTree;
         friend class Node;
@@ -195,6 +211,9 @@ namespace cbt {
         ~Monitor();
         void work(Node* n);
         void addNode(Node* n);
+
+      protected:
+        virtual std::string getSlaveName() const;
 
       private:
         friend class CompressTree;

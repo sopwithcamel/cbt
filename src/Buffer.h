@@ -37,11 +37,6 @@ namespace cbt {
         friend class Compressor;
 
         public:
-          enum CompressionAction {
-              NONE,
-              COMPRESS,
-              DECOMPRESS
-          };
 
 #ifdef ENABLE_PAGING
           enum PageAction {
@@ -103,15 +98,14 @@ namespace cbt {
           void cleanupPaging();
 #endif
 
+          /* Sorting-related */
+          void quicksort();
+          bool sort();
+
           /* Compression-related */
           bool compress();
           bool decompress();
           void setCompressible(bool flag);
-          /* return value indicates whether the node needs to be added or
-           * if it's already present in the queue */
-          bool checkCompress();
-          bool checkDecompress();
-          void waitForCompressAction(const CompressionAction& act);
           void performCompressAction();
           CompressionAction getCompressAction();
 
@@ -124,7 +118,6 @@ namespace cbt {
            * if it's already present in the queue */
           bool checkPageOut();
           bool checkPageIn();
-          void waitForPageAction(const PageAction& act);
           bool performPageAction();
           PageAction getPageAction();
 #endif
@@ -133,22 +126,14 @@ namespace cbt {
           const Node* node_;
           /* buffer fragments */
           std::vector<List*> lists_;
-
-          /* Compression related */
           bool compressible_;
-          bool queuedForCompAct_;
-          CompressionAction compAct_;
-          pthread_cond_t compActCond_;
-          pthread_mutex_t compActMutex_;
+          // used during sort
+          char** perm_;
 
 #ifdef ENABLE_PAGING
           /* Paging-related */
-          FILE* f_;
           bool pageable_;
-          bool queuedForPaging_;
-          PageAction pageAct_;
-          pthread_cond_t pageCond_;
-          pthread_mutex_t pageMutex_;
+          FILE* f_;
 #endif  // ENABLE_PAGING
     };
 }

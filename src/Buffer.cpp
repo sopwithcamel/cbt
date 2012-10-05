@@ -83,9 +83,12 @@ namespace cbt {
     }
 
     Buffer::Buffer() :
-        compressible_(true),
-        queuedForCompAct_(false),
-        compAct_(NONE) {
+            compressible_(true),
+            queuedForCompAct_(false),
+            compAct_(NONE) {
+        pthread_mutex_init(&sortMutex_, NULL);
+        pthread_cond_init(&sortCond_, NULL);
+
         pthread_mutex_init(&compActMutex_, NULL);
         pthread_cond_init(&compActCond_, NULL);
 
@@ -101,6 +104,9 @@ namespace cbt {
 
     Buffer::~Buffer() {
         deallocate();
+
+        pthread_mutex_destroy(&sortMutex_);
+        pthread_cond_destroy(&sortCond_);
 
         pthread_mutex_destroy(&compActMutex_);
         pthread_cond_destroy(&compActCond_);
@@ -151,6 +157,160 @@ namespace cbt {
     void Buffer::setParent(Node* n) {
         node_ = n;
     }
+
+    void Buffer::quicksort(uint32_t uleft, uint32_t uright) {
+        int32_t i, j, stack_pointer = -1;
+        int32_t left = uleft;
+        int32_t right = uright;
+        int32_t* rstack = new int32_t[128];
+        uint32_t swap, temp;
+        uint32_t sizs, sizt;
+        char *pers, *pert;
+        uint32_t* arr = lists_[0]->hashes_;
+        uint32_t* siz = lists_[0]->sizes_;
+        while (true) {
+            if (right - left <= 7) {
+                for (j = left + 1; j <= right; j++) {
+                    swap = arr[j];
+                    sizs = siz[j];
+                    pers = perm_[j];
+                    i = j - 1;
+                    if (i < 0) {
+                        fprintf(stderr, "Noo");
+                        assert(false);
+                    }
+                    while (i >= left && (arr[i] > swap)) {
+                        arr[i + 1] = arr[i];
+                        siz[i + 1] = siz[i];
+                        perm_[i + 1] = perm_[i];
+                        i--;
+                    }
+                    arr[i + 1] = swap;
+                    siz[i + 1] = sizs;
+                    perm_[i + 1] = pers;
+                }
+                if (stack_pointer == -1) {
+                    break;
+                }
+                right = rstack[stack_pointer--];
+                left = rstack[stack_pointer--];
+            } else {
+                int median = (left + right) >> 1;
+                i = left + 1;
+                j = right;
+
+                swap = arr[median];
+                arr[median] = arr[i];
+                arr[i] = swap;
+
+                sizs = siz[median];
+                siz[median] = siz[i];
+                siz[i] = sizs;
+
+                pers = perm_[median];
+                perm_[median] = perm_[i];
+                perm_[i] = pers;
+
+                if (arr[left] > arr[right]) {
+                    swap = arr[left];
+                    arr[left] = arr[right];
+                    arr[right] = swap;
+
+                    sizs = siz[left];
+                    siz[left] = siz[right];
+                    siz[right] = sizs;
+
+                    pers = perm_[left];
+                    perm_[left] = perm_[right];
+                    perm_[right] = pers;
+                }
+                if (arr[i] > arr[right]) {
+                    swap = arr[i];
+                    arr[i] = arr[right];
+                    arr[right] = swap;
+
+                    sizs = siz[i];
+                    siz[i] = siz[right];
+                    siz[right] = sizs;
+
+                    pers = perm_[i];
+                    perm_[i] = perm_[right];
+                    perm_[right] = pers;
+                }
+                if (arr[left] > arr[i]) {
+                    swap = arr[left];
+                    arr[left] = arr[i];
+                    arr[i] = swap;
+
+                    sizs = siz[left];
+                    siz[left] = siz[i];
+                    siz[i] = sizs;
+
+                    pers = perm_[left];
+                    perm_[left] = perm_[i];
+                    perm_[i] = pers;
+                }
+                temp = arr[i];
+                sizt = siz[i];
+                pert = perm_[i];
+                while (true) {
+                    while (arr[++i] < temp);
+                    while (arr[--j] > temp);
+                    if (j < i) {
+                        break;
+                    }
+                    swap = arr[i];
+                    arr[i] = arr[j];
+                    arr[j] = swap;
+
+                    sizs = siz[i];
+                    siz[i] = siz[j];
+                    siz[j] = sizs;
+
+                    pers = perm_[i];
+                    perm_[i] = perm_[j];
+                    perm_[j] = pers;
+                }
+                arr[left + 1] = arr[j];
+                siz[left + 1] = siz[j];
+                perm_[left + 1] = perm_[j];
+                arr[j] = temp;
+                siz[j] = sizt;
+                perm_[j] = pert;
+                if (right - i + 1 >= j - left) {
+                    rstack[++stack_pointer] = i;
+                    rstack[++stack_pointer] = right;
+                    right = j - 1;
+                } else {
+                    rstack[++stack_pointer] = left;
+                    rstack[++stack_pointer] = j - 1;
+                    left = i;
+                }
+            }
+        }
+        delete[] rstack;
+    }
+
+    // Sorting-related
+    bool Buffer::sort() {
+        if (empty())
+            return true;
+        // initialize pointers to serialized PAOs
+        uint32_t num = numElements();
+        perm_ = reinterpret_cast<char**>(malloc(sizeof(char*) * num));
+        uint32_t offset = 0;
+        for (uint32_t i = 0; i < num; ++i) {
+            perm_[i] = lists_[0]->data_ + offset;
+            offset += lists_[0]->sizes_[i];
+        }
+
+        // quicksort elements
+        quicksort(0, num - 1);
+        checkIntegrity();
+        return true;
+    }
+
+    // Compression-related    
 
     bool Buffer::compress() {
         if (!empty()) {
@@ -250,83 +410,6 @@ namespace cbt {
         pthread_mutex_unlock(&compActMutex_);
     }
 
-    bool Buffer::checkCompress() {
-        pthread_mutex_lock(&compActMutex_);
-        // check if node already in compression action list
-        if (queuedForCompAct_) {
-            // check if compression request has been cancelled
-            if (compAct_ == DECOMPRESS) {
-                /* This case shouldn't occur */
-                fprintf(stderr, "Node %d trying to be compressed while\
-                    waiting for decompression\n", node_->id_);
-                assert(false);
-            } else if (compAct_ == NONE) {
-                compAct_ = COMPRESS;
-                pthread_mutex_unlock(&compActMutex_);
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "Node %d reset to compress\n", node_->id_);
-#endif
-                return false;
-            } else {
-                /* previous list queued for compression hasn't been compressed
-                   yet. No need to add node again */
-                pthread_mutex_unlock(&compActMutex_);
-                return false;
-            }
-        } else {
-            if (empty()) {
-                queuedForCompAct_ = false;
-                pthread_mutex_unlock(&compActMutex_);
-                return false;
-            } else {
-                queuedForCompAct_ = true;
-                compAct_ = COMPRESS;
-                pthread_mutex_unlock(&compActMutex_);
-                return true;
-            }
-        }
-    }
-
-    bool Buffer::checkDecompress() {
-        pthread_mutex_lock(&compActMutex_);
-        // check if node already in list
-        if (queuedForCompAct_) {
-            /* check if compression request is outstanding and cancel this */
-            if (compAct_ == COMPRESS || compAct_ == NONE) {
-                compAct_ = DECOMPRESS;
-                pthread_mutex_unlock(&compActMutex_);
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "Node %d reset to decompress\n", node_->id_);
-#endif
-                return false;
-            } else {  // we're decompressing twice
-                fprintf(stderr, "Trying to decompress node %d twice",
-                        node_->id_);
-                assert(false);
-            }
-        } else {
-            // check if the buffer is empty;
-            if (empty()) {
-                queuedForCompAct_ = false;
-                pthread_mutex_unlock(&compActMutex_);
-                return false;
-            } else {
-                queuedForCompAct_ = true;
-                compAct_ = DECOMPRESS;
-                pthread_mutex_unlock(&compActMutex_);
-                return true;
-            }
-        }
-    }
-
-    void Buffer::waitForCompressAction(const CompressionAction& act) {
-        // make sure the buffer has been decompressed
-        pthread_mutex_lock(&compActMutex_);
-        while (queuedForCompAct_ && compAct_ == act)
-            pthread_cond_wait(&compActCond_, &compActMutex_);
-        pthread_mutex_unlock(&compActMutex_);
-    }
-
     void Buffer::performCompressAction() {
         pthread_mutex_lock(&compActMutex_);
         if (compAct_ == COMPRESS) {
@@ -335,7 +418,7 @@ namespace cbt {
         } else if (compAct_ == DECOMPRESS) {
             pthread_mutex_unlock(&compActMutex_);
 #ifdef ENABLE_PAGING
-            waitForPageAction(PAGE_IN);
+            wait(PAGE_IN);
 #endif
             pthread_mutex_lock(&compActMutex_);
             decompress();
@@ -500,13 +583,6 @@ namespace cbt {
             pthread_mutex_unlock(&pageMutex_);
             return true;
         }
-    }
-
-    void Buffer::waitForPageAction(const PageAction& act) {
-        pthread_mutex_lock(&pageMutex_);
-        while (queuedForPaging_ && pageAct_ == act)
-            pthread_cond_wait(&pageCond_, &pageMutex_);
-        pthread_mutex_unlock(&pageMutex_);
     }
 
     bool Buffer::performPageAction() {

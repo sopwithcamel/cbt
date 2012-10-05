@@ -88,9 +88,11 @@ namespace cbt {
         // find first set bit
         pthread_spin_lock(&maskLock_);
         uint32_t temp = tmask_, next = 0;
-        for ( ; temp; temp >>= 1, next++)
+        for ( ; temp; temp >>= 1) {
+            next++;
             if (temp & 1)
                 break;
+        }
         if (next > 0) {  // sleeping thread found, so set as awake
             tmask_ &= ~(1 << (next - 1));
         }
@@ -98,15 +100,15 @@ namespace cbt {
 
         // wake up thread
         if (next > 0) {
-            pthread_mutex_lock(&(threads_[next - 1].mutex_));
-            pthread_cond_signal(&(threads_[next - 1].hasWork_));
-            pthread_mutex_unlock(&(threads_[next - 1].mutex_));
+            pthread_mutex_lock(&(threads_[next - 1]->mutex_));
+            pthread_cond_signal(&(threads_[next - 1]->hasWork_));
+            pthread_mutex_unlock(&(threads_[next - 1]->mutex_));
         }
     }
 
     inline void Slave::setThreadSleep(uint32_t ind) {
         pthread_spin_lock(&maskLock_);
-        tmask_ |= (1 << (ind - 1));
+        tmask_ |= (1 << ind);
         pthread_spin_unlock(&maskLock_);
     }
 
@@ -160,10 +162,6 @@ namespace cbt {
         Pthread_args* a = reinterpret_cast<Pthread_args*>(arg);
         Slave* slave = static_cast<Slave*>(a->context);
         slave->slaveRoutine(a->desc);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "%s (%d) quitting: %ld\n", getSlaveName().c_str(),
-                me->index_, nodes_.size());
-#endif  // CT_NODE_DEBUG
         pthread_exit(NULL);
     }
 
@@ -198,19 +196,39 @@ namespace cbt {
                 Node* n = getNextNode();
                 if (!n)
                     break;
+#ifdef CT_NODE_DEBUG
+                fprintf(stderr, "%s (%d): working on node: %d (size: %u)\t",
+                        getSlaveName().c_str(), me->index_, n->id_,
+                        n->buffer_.numElements());
+                fprintf(stderr, "remaining: ");
+                printElements();
+#endif
                 work(n);
             }
             if (checkInputComplete())
                 break;
         }
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "%s (%d) quitting: %ld\n",
+                getSlaveName().c_str(), me->index_, nodes_.size());
+#endif  // CT_NODE_DEBUG
     }
 
 #ifdef CT_NODE_DEBUG
-    void Slave::printElements() const {
+    void Slave::printElements() {
+        if (empty()) {
+            fprintf(stderr, "NULL\n");
+            return;
+        }
+        pthread_spin_lock(&nodesLock_);
         for (uint32_t i = 0; i < nodes_.size(); ++i) {
-            fprintf(stderr, "%d, ", nodes_[i]->id());
+            if (nodes_[i]->isRoot())
+                fprintf(stderr, "%d*, ", nodes_[i]->id());
+            else
+                fprintf(stderr, "%d, ", nodes_[i]->id());
         }
         fprintf(stderr, "\n");
+        pthread_spin_unlock(&nodesLock_);
     }
 #endif  // CT_NODE_DEBUG
 
@@ -226,9 +244,9 @@ namespace cbt {
             arg->context = reinterpret_cast<void*>(this);
             arg->desc = t;
 
-            pthread_create(threads_[t->index_].thread_, &attr, callHelper,
+            pthread_create(&(t->thread_), &attr, callHelper,
                     reinterpret_cast<void*>(arg));
-            threads_.push_back(*t);
+            threads_.push_back(t);
         }
     }
 
@@ -237,8 +255,9 @@ namespace cbt {
         setInputComplete(true);
         for (uint32_t i = 0; i < numThreads_; ++i) {
             wakeup();
-            pthread_join(*(threads_[i].thread_), &status);
+            pthread_join(threads_[i]->thread_, &status);
         }
+        // TODO clean up thread state
     }
 
 
@@ -249,6 +268,13 @@ namespace cbt {
     }
 
     Emptier::~Emptier() {
+    }
+
+    bool Emptier::empty() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = queue_.empty();
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
     }
 
     Node* Emptier::getNextNode(bool fromHead) {
@@ -273,13 +299,6 @@ namespace cbt {
         if (n->isRoot())
             rootFlag = true;
 
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "emptier: emptying node: %d (size: %u)\t",
-                n->id_, n->buffer_.numElements());
-        fprintf(stderr, "remaining: ");
-        queue_.printElements();
-#endif // CT_NODE_DEBUG
-
         if (n->isRoot()) {
             n->aggregateSortedBuffer();
         } else {
@@ -300,8 +319,11 @@ namespace cbt {
     }
 
     void Emptier::addNode(Node* node) {
-        pthread_spin_lock(&nodesLock_);
         if (node) {
+            // set queue status
+            setQueueStatus(EMPTY);
+
+            pthread_spin_lock(&nodesLock_);
             queue_.insert(node, node->level());
 
             std::deque<Node*> depNodes;
@@ -317,12 +339,26 @@ namespace cbt {
                 }
                 depNodes.pop_front();
             }
+        pthread_spin_unlock(&nodesLock_);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (size: %u) added to to-empty list: ",
                 node->id_, node->buffer_.numElements());
-        queue_.printElements();
+        printElements();
 #endif
         }
+    }
+
+    std::string Emptier::getSlaveName() const {
+        return "Emptier";
+    }
+
+    void Emptier::printElements() {
+        if (empty()) {
+            fprintf(stderr, "NULL\n");
+            return;
+        }
+        pthread_spin_lock(&nodesLock_);
+        queue_.printElements();
         pthread_spin_unlock(&nodesLock_);
     }
 
@@ -336,7 +372,7 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        n->performCompressAction();
+        n->perform();
     }
 
     void Compressor::addNode(Node* node) {
@@ -372,6 +408,10 @@ namespace cbt {
         }
     }
 
+    std::string Compressor::getSlaveName() const {
+        return "Compressor";
+    }
+
     // Sorter
 
     Sorter::Sorter(CompressTree* tree) :
@@ -382,13 +422,7 @@ namespace cbt {
     }
 
     void Sorter::work(Node* n) {
-        n->waitForCompressAction(Buffer::DECOMPRESS);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "sorter: sorting node: %d (size: %u)\t",
-                n->id_, n->buffer_.numElements());
-        fprintf(stderr, "remaining: ");
-        printElements();
-#endif
+        n->wait(DECOMPRESS);
         if (n->isRoot()) {
             n->sortBuffer();
         } else {
@@ -401,19 +435,19 @@ namespace cbt {
     void Sorter::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
-            pthread_mutex_lock(&node->queuedForEmptyMutex_);
-            node->queuedForEmptying_ = true;
-            pthread_mutex_unlock(&node->queuedForEmptyMutex_);
+            setQueueStatus(SORT);
             addNodeToQueue(node);
 
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
                     node->id_, node->buffer_.numElements());
-            fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
-                    node->id_, node->buffer_.numElements());
             printElements();
 #endif  // CT_NODE_DEBUG
         }
+    }
+
+    std::string Sorter::getSlaveName() const {
+        return "Sorter";
     }
 
 #ifdef ENABLE_PAGING
@@ -429,7 +463,7 @@ namespace cbt {
 
 
     void Pager::work(Node* n) {
-        bool suc = n->performPageAction();
+        bool suc = n->perform();
         if (!suc)
             addNodeToQueue(n);
     }
@@ -446,6 +480,10 @@ namespace cbt {
         fprintf(stderr, "Node %d added to page list: ", node->id_);
         printElements();
 #endif  // CT_NODE_DEBUG
+    }
+
+    std::string Pager::getSlaveName() const {
+        return "Pager";
     }
 #endif  // ENABLE_PAGING
 
@@ -480,6 +518,10 @@ namespace cbt {
 
     void Monitor::addNode(Node* n) {
         return;
+    }
+
+    std::string Monitor::getSlaveName() const {
+        return "Monitor";
     }
 #endif
 }

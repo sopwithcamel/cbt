@@ -48,7 +48,11 @@ namespace cbt {
         ~EmptyQueue() {}
 
         void insert(Node* n, uint32_t prio) {
-            nodeList_[n] = prio;
+            PQ::iterator it = nodeList_.find(n);
+            if (it == nodeList_.end())
+                nodeList_[n] = prio;
+            else if (it->second < prio)
+                it->second = prio;
         }
 
         Node* pop() {
@@ -78,10 +82,14 @@ namespace cbt {
             return nodeList_.size();
         }
 
-        void printElements() const {
-            for (PQ::const_iterator it = nodeList_.begin(); it != nodeList_.end();
-                    ++it)
-                fprintf(stderr, "%d(%d), ", it->first->id(), it->second);
+        void printElements() {
+            for (PQ::const_iterator it = nodeList_.begin();
+                    it != nodeList_.end(); ++it) {
+                if (it->first->isRoot())
+                    fprintf(stderr, "%d(%d)*, ", it->first->id(), it->second);
+                else
+                    fprintf(stderr, "%d(%d), ", it->first->id(), it->second);
+            }
             fprintf(stderr, "\n");
         }
 

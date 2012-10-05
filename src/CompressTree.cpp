@@ -60,15 +60,9 @@ namespace cbt {
         pthread_mutex_init(&rootNodeAvailableMutex_, NULL);
         pthread_cond_init(&rootNodeAvailableForWriting_, NULL);
 
-        uint32_t threadCount = 4;
-#ifdef ENABLE_PAGING
-        threadCount++;
-#endif
 #ifdef ENABLE_COUNTERS
-        threadCount++;
         monitor_ = NULL;
 #endif
-        pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
     }
 
     CompressTree::~CompressTree() {
@@ -287,7 +281,7 @@ namespace cbt {
                 fprintf(stderr, "Pushing node %d to all-leaves\t",
                         curNode->id_);
                 fprintf(stderr, "Now has: ");
-                for (int i = 0; i < allLeaves_.size(); ++i) {
+                for (uint32_t i = 0; i < allLeaves_.size(); ++i) {
                     fprintf(stderr, "%d ", allLeaves_[i]->id_);
                 }
                 fprintf(stderr, "\n");
@@ -371,23 +365,40 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
+        uint32_t sorterThreadCount = 2;
+        uint32_t compressorThreadCount = 1;
+        uint32_t emptierThreadCount = 1;
+
+        // One for the inserter
+        uint32_t threadCount = sorterThreadCount + compressorThreadCount +
+                emptierThreadCount + 1;
+#ifdef ENABLE_PAGING
+        uint32_t pagerThreadCount = 1;
+        threadCount += pagerThreadCount;
+#endif
+#ifdef ENABLE_COUNTERS
+        uint32_t monitorThreadCount = 1;
+        threadCount += monitorThreadCount;
+#endif
+        pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
+
         sorter_ = new Sorter(this);
-        sorter_->startThreads();
+        sorter_->startThreads(sorterThreadCount);
 
         compressor_ = new Compressor(this);
-        compressor_->startThreads();
+        compressor_->startThreads(compressorThreadCount);
 
         emptier_ = new Emptier(this);
-        emptier_->startThreads();
+        emptier_->startThreads(emptierThreadCount);
 
 #ifdef ENABLE_PAGING
         pager_ = new Pager(this);
-        pager_->startThreads();
+        pager_->startThreads(pagerThreadCount);
 #endif
 
 #ifdef ENABLE_COUNTERS
         monitor_ = new Monitor(this);
-        monitor_->startThreads();
+        monitor_->startThreads(monitorThreadCount);
 #endif
 
         pthread_barrier_wait(&threadsBarrier_);
