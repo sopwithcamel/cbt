@@ -30,74 +30,219 @@
 namespace cbt {
     Slave::Slave(CompressTree* tree) :
             tree_(tree),
+            askForCompletionNotice_(false),
+            tmask_(0), // everyone awake
             inputComplete_(false),
-            queueEmpty_(true),
-            askForCompletionNotice_(false) {
-        pthread_mutex_init(&queueMutex_, NULL);
-        pthread_cond_init(&queueHasWork_, NULL);
+            nodesEmpty_(true) {
+        pthread_spin_init(&nodesLock_, PTHREAD_PROCESS_PRIVATE);
 
         pthread_mutex_init(&completionMutex_, NULL);
         pthread_cond_init(&complete_, NULL);
+
+        pthread_spin_init(&maskLock_, PTHREAD_PROCESS_PRIVATE);
     }
 
-    bool Slave::empty() const {
-        return queueEmpty_;
+    inline bool Slave::empty() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = nodes_.empty();
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
     }
 
-    bool Slave::wakeup() {
-        pthread_mutex_lock(&queueMutex_);
-        pthread_cond_signal(&queueHasWork_);
-        pthread_mutex_unlock(&queueMutex_);
+    inline bool Slave::inputComplete() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = inputComplete_;
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
+    }
+
+    Node* Slave::getNextNode(bool fromHead) {
+        Node* ret;
+        pthread_spin_lock(&nodesLock_);
+        if (nodes_.empty()) {
+            ret = false;
+        } else if (fromHead) {
+            ret = nodes_.front();
+            nodes_.pop_front();
+        } else {
+            ret = nodes_.back();
+            nodes_.pop_back();
+        }
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
+    }
+
+    bool Slave::addNodeToQueue(Node* node, bool toTail) {
+        pthread_spin_lock(&nodesLock_);
+        if (toTail) {
+            nodes_.push_back(node);
+        } else {
+            nodes_.push_front(node);
+        }
+        pthread_spin_unlock(&nodesLock_);
         return true;
     }
 
-    void Slave::sendCompletionNotice() {
+    /* Naive for now */
+    void Slave::wakeup() {
+        // find first set bit
+        pthread_spin_lock(&maskLock_);
+        uint32_t temp = tmask_, next = 0;
+        for ( ; temp; temp >>= 1, next++)
+            if (temp & 1)
+                break;
+        if (next > 0) {  // sleeping thread found, so set as awake
+            tmask_ &= ~(1 << (next - 1));
+        }
+        pthread_spin_unlock(&maskLock_);
+
+        // wake up thread
+        if (next > 0) {
+            pthread_mutex_lock(&(threads_[next - 1].mutex_));
+            pthread_cond_signal(&(threads_[next - 1].hasWork_));
+            pthread_mutex_unlock(&(threads_[next - 1].mutex_));
+        }
+    }
+
+    inline void Slave::setThreadSleep(uint32_t ind) {
+        pthread_spin_lock(&maskLock_);
+        tmask_ |= (1 << (ind - 1));
+        pthread_spin_unlock(&maskLock_);
+    }
+
+    // TODO: Using a naive method for now
+    inline uint32_t Slave::getNumberOfSleepingThreads() {
+        uint32_t c;
+        pthread_spin_lock(&maskLock_);
+        uint64_t v = tmask_;
+        for (c = 0; v; v >>= 1)
+            c += (v & 1);
+        pthread_spin_unlock(&maskLock_);
+        return c; 
+    }
+
+    void Slave::checkSendCompletionNotice() {
         pthread_mutex_lock(&completionMutex_);
         if (askForCompletionNotice_) {
-            pthread_cond_signal(&complete_);
-            askForCompletionNotice_ = false;
+            // can signal only if I'm the last thread awake so I check if the
+            // number of sleeping threads is numThreads_ - 1
+            if (getNumberOfSleepingThreads() == (numThreads_ - 1)) {
+                pthread_cond_signal(&complete_);
+                askForCompletionNotice_ = false;
+            }
         }
         pthread_mutex_unlock(&completionMutex_);
     }
 
+    inline void Slave::setInputComplete(bool value) {
+        pthread_spin_lock(&nodesLock_);
+        inputComplete_ = value;
+        pthread_spin_unlock(&nodesLock_);
+    }
+
+    bool Slave::checkInputComplete() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = inputComplete_;
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
+    }
+
     void Slave::waitUntilCompletionNoticeReceived() {
-        pthread_mutex_lock(&queueMutex_);
         if (!empty()) {
             pthread_mutex_lock(&completionMutex_);
             askForCompletionNotice_ = true;
-            pthread_mutex_unlock(&queueMutex_);
-
             pthread_cond_wait(&complete_, &completionMutex_);
             pthread_mutex_unlock(&completionMutex_);
-        } else {
-            pthread_mutex_unlock(&queueMutex_);
         }
     }
 
-    void* Slave::callHelper(void* context) {
-        return static_cast<Slave*>(context)->work();
+    void* Slave::callHelper(void* arg) {
+        Pthread_args* a = reinterpret_cast<Pthread_args*>(arg);
+        Slave* slave = static_cast<Slave*>(a->context);
+        slave->slaveRoutine(a->desc);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "%s (%d) quitting: %ld\n", getSlaveName().c_str(),
+                me->index_, nodes_.size());
+#endif  // CT_NODE_DEBUG
+        pthread_exit(NULL);
     }
 
+    void Slave::slaveRoutine(ThreadStruct* me) {
+        // Things get messed up if some workers enter before all are created
+        pthread_barrier_wait(&tree_->threadsBarrier_);
+
+        while (empty()) {
+            // check if anybody wants a notification when list is empty
+            checkSendCompletionNotice();
+
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "%s (%d) sleeping\n", getSlaveName().c_str(),
+                    me->index_);
+#endif  // CT_NODE_DEBUG
+
+            // mark thread as sleeping in mask
+            setThreadSleep(me->index_);
+
+            // sleep until woken up
+            pthread_mutex_lock(&(me->mutex_));
+            pthread_cond_wait(&(me->hasWork_), &(me->mutex_));
+            pthread_mutex_unlock(&(me->mutex_));
+
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "%s (%d) fingered\n", getSlaveName().c_str(),
+                    me->index_);
+#endif  // CT_NODE_DEBUG
+
+            // Actually do Slave work
+            while (true) {
+                Node* n = getNextNode();
+                if (!n)
+                    break;
+                work(n);
+            }
+            if (checkInputComplete())
+                break;
+        }
+    }
+
+#ifdef CT_NODE_DEBUG
     void Slave::printElements() const {
         for (uint32_t i = 0; i < nodes_.size(); ++i) {
             fprintf(stderr, "%d, ", nodes_[i]->id());
         }
         fprintf(stderr, "\n");
     }
+#endif  // CT_NODE_DEBUG
 
-    void Slave::startThreads() {
+    void Slave::startThreads(uint32_t num) {
         pthread_attr_t attr;
+        numThreads_ = num;
         pthread_attr_init(&attr);
-        pthread_create(&thread_, &attr, callHelper,
-                reinterpret_cast<void*>(this));
+        for (uint32_t i = 0; i < numThreads_; ++i) {
+            ThreadStruct* t = new ThreadStruct();
+            t->index_ = i;
+
+            Pthread_args* arg = new Pthread_args(); 
+            arg->context = reinterpret_cast<void*>(this);
+            arg->desc = t;
+
+            pthread_create(threads_[t->index_].thread_, &attr, callHelper,
+                    reinterpret_cast<void*>(arg));
+            threads_.push_back(*t);
+        }
     }
 
     void Slave::stopThreads() {
         void* status;
         setInputComplete(true);
-        wakeup();
-        pthread_join(thread_, &status);
+        for (uint32_t i = 0; i < numThreads_; ++i) {
+            wakeup();
+            pthread_join(*(threads_[i].thread_), &status);
+        }
     }
+
+
+    // Emptier
 
     Emptier::Emptier(CompressTree* tree) :
             Slave(tree) {
@@ -106,66 +251,58 @@ namespace cbt {
     Emptier::~Emptier() {
     }
 
-    void* Emptier::work() {
-        bool rootFlag = false;
-        pthread_mutex_lock(&queueMutex_);
-        pthread_barrier_wait(&tree_->threadsBarrier_);
-        while (queue_.empty() && !inputComplete_) {
-            /* check if anybody wants a notification when list is empty */
-            sendCompletionNotice();
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "emptier sleeping\n");
-#endif
-            queueEmpty_ = true;
-            pthread_cond_wait(&queueHasWork_, &queueMutex_);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "emptier fingered\n");
-#endif
-            while (!queue_.empty()) {
-                Node* n = queue_.pop();
-                pthread_mutex_unlock(&queueMutex_);
-                pthread_mutex_lock(&n->queuedForEmptyMutex_);
-                n->queuedForEmptying_ = false;
-                pthread_mutex_unlock(&n->queuedForEmptyMutex_);
-                if (n->isRoot())
-                    rootFlag = true;
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "emptier: emptying node: %d (size: %u)\t",
-                        n->id_, n->buffer_.numElements());
-                fprintf(stderr, "remaining: ");
-                queue_.printElements();
-#endif
-                if (n->isRoot()) {
-                    n->aggregateSortedBuffer();
-                } else {
-                    n->aggregateMergedBuffer();
-                }
-                n->emptyBuffer();
-                if (n->isLeaf())
-                    tree_->handleFullLeaves();
-                if (rootFlag) {
-                    // do the split and create new root
-                    rootFlag = false;
-
-                    pthread_mutex_lock(&tree_->rootNodeAvailableMutex_);
-                    pthread_cond_signal(&tree_->rootNodeAvailableForWriting_);
-                    pthread_mutex_unlock(&tree_->rootNodeAvailableMutex_);
-                }
-                pthread_mutex_lock(&queueMutex_);
-            }
+    Node* Emptier::getNextNode(bool fromHead) {
+        Node* ret;
+        pthread_spin_lock(&nodesLock_);
+        if (queue_.empty()) {
+            ret = false;
+        } else {
+            ret = queue_.pop();
         }
-        pthread_mutex_unlock(&queueMutex_);
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
+    }
+
+    void Emptier::work(Node* n) {
+        bool rootFlag = false;
+
+        pthread_mutex_lock(&n->queuedForEmptyMutex_);
+        n->queuedForEmptying_ = false;
+        pthread_mutex_unlock(&n->queuedForEmptyMutex_);
+
+        if (n->isRoot())
+            rootFlag = true;
+
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Emptier quitting: %ld\n", queue_.size());
-#endif
-        pthread_exit(NULL);
+        fprintf(stderr, "emptier: emptying node: %d (size: %u)\t",
+                n->id_, n->buffer_.numElements());
+        fprintf(stderr, "remaining: ");
+        queue_.printElements();
+#endif // CT_NODE_DEBUG
+
+        if (n->isRoot()) {
+            n->aggregateSortedBuffer();
+        } else {
+            n->aggregateMergedBuffer();
+        }
+
+        n->emptyBuffer();
+        if (n->isLeaf())
+            tree_->handleFullLeaves();
+        if (rootFlag) {
+            // do the split and create new root
+            rootFlag = false;
+
+            pthread_mutex_lock(&tree_->rootNodeAvailableMutex_);
+            pthread_cond_signal(&tree_->rootNodeAvailableForWriting_);
+            pthread_mutex_unlock(&tree_->rootNodeAvailableMutex_);
+        }
     }
 
     void Emptier::addNode(Node* node) {
-        pthread_mutex_lock(&queueMutex_);
+        pthread_spin_lock(&nodesLock_);
         if (node) {
             queue_.insert(node, node->level());
-            queueEmpty_ = false;
 
             std::deque<Node*> depNodes;
             uint32_t prio = node->level();
@@ -186,8 +323,10 @@ namespace cbt {
         queue_.printElements();
 #endif
         }
-        pthread_mutex_unlock(&queueMutex_);
+        pthread_spin_unlock(&nodesLock_);
     }
+
+    // Compressor
 
     Compressor::Compressor(CompressTree* tree) :
             Slave(tree) {
@@ -196,44 +335,18 @@ namespace cbt {
     Compressor::~Compressor() {
     }
 
-    void* Compressor::work() {
-        pthread_mutex_lock(&queueMutex_);
-        pthread_barrier_wait(&tree_->threadsBarrier_);
-        while (nodes_.empty() && !inputComplete_) {
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "compressor sleeping\n");
-#endif
-            queueEmpty_ = true;
-            pthread_cond_wait(&queueHasWork_, &queueMutex_);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "compressor fingered\n");
-#endif
-            while (!nodes_.empty()) {
-                Node* n = nodes_.front();
-                nodes_.pop_front();
-                pthread_mutex_unlock(&queueMutex_);
-                n->performCompressAction();
-                pthread_mutex_lock(&queueMutex_);
-            }
-            /* check if anybody wants a notification when list is empty */
-            sendCompletionNotice();
-        }
-        pthread_mutex_unlock(&queueMutex_);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Compressor quitting: %ld\n", nodes_.size());
-#endif
-        pthread_exit(NULL);
+    void Compressor::work(Node* n) {
+        n->performCompressAction();
     }
 
     void Compressor::addNode(Node* node) {
         Buffer::CompressionAction act = node->getCompressAction();
         if (act == Buffer::COMPRESS) {
-            pthread_mutex_lock(&queueMutex_);
-            nodes_.push_back(node);
+            addNodeToQueue(node);
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "adding node %d to compress: ", node->id_);
             printElements();
-#endif
+#endif  // CT_NODE_DEBUG
 #ifdef ENABLE_PAGING
             /* Put in a request for paging out. This is necessary to do
              * right away because of the following case: if a page-in request
@@ -243,22 +356,23 @@ namespace cbt {
              * where a decompression later assumes that the page-in has
              * completed */
             node->scheduleBufferPageAction(Buffer::PAGE_OUT);
-#endif
+#endif  // ENABLE_PAGING
         } else {
 #ifdef ENABLE_PAGING
             node->scheduleBufferPageAction(Buffer::PAGE_IN);
-#endif
-            pthread_mutex_lock(&queueMutex_);
-            nodes_.push_front(node);
+#endif  // ENABLE_PAGING
+
+            addNodeToQueue(node, /* toTail = */false);
+
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "adding node %d (size: %u) to decompress: ",
                     node->id_, node->buffer_.numElements());
             printElements();
-#endif
+#endif  // CT_NODE_DEBUG
         }
-        queueEmpty_ = false;
-        pthread_mutex_unlock(&queueMutex_);
     }
+
+    // Sorter
 
     Sorter::Sorter(CompressTree* tree) :
             Slave(tree) {
@@ -267,74 +381,45 @@ namespace cbt {
     Sorter::~Sorter() {
     }
 
-    void* Sorter::work() {
-        pthread_mutex_lock(&queueMutex_);
-        pthread_barrier_wait(&tree_->threadsBarrier_);
-        while (nodes_.empty() && !inputComplete_) {
+    void Sorter::work(Node* n) {
+        n->waitForCompressAction(Buffer::DECOMPRESS);
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "sorter sleeping\n");
+        fprintf(stderr, "sorter: sorting node: %d (size: %u)\t",
+                n->id_, n->buffer_.numElements());
+        fprintf(stderr, "remaining: ");
+        printElements();
 #endif
-            queueEmpty_ = true;
-            pthread_cond_wait(&queueHasWork_, &queueMutex_);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "sorter fingered\n");
-#endif
-            while (!nodes_.empty()) {
-                Node* n = nodes_.front();
-                nodes_.pop_front();
-                pthread_mutex_unlock(&queueMutex_);
-                n->waitForCompressAction(Buffer::DECOMPRESS);
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "sorter: sorting node: %d (size: %u)\t",
-                        n->id_, n->buffer_.numElements());
-                fprintf(stderr, "remaining: ");
-                for (int i = 0; i < nodes_.size(); ++i)
-                    fprintf(stderr, "%d, ", nodes_[i]->id_);
-                fprintf(stderr, "\n");
-#endif
-                if (n->isRoot()) {
-                    n->sortBuffer();
-                } else {
-                    n->mergeBuffer();
-                }
-                tree_->emptier_->addNode(n);
-                tree_->emptier_->wakeup();
-                pthread_mutex_lock(&queueMutex_);
-            }
-            sendCompletionNotice();
+        if (n->isRoot()) {
+            n->sortBuffer();
+        } else {
+            n->mergeBuffer();
         }
-        pthread_mutex_unlock(&queueMutex_);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Sorter quitting: %ld\n", nodes_.size());
-#endif
-        pthread_exit(NULL);
+        tree_->emptier_->addNode(n);
+        tree_->emptier_->wakeup();
     }
 
     void Sorter::addNode(Node* node) {
-        pthread_mutex_lock(&queueMutex_);
         if (node) {
             // Set node as queued for emptying
             pthread_mutex_lock(&node->queuedForEmptyMutex_);
             node->queuedForEmptying_ = true;
             pthread_mutex_unlock(&node->queuedForEmptyMutex_);
-            nodes_.push_back(node);
-            queueEmpty_ = false;
+            addNodeToQueue(node);
+
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
                     node->id_, node->buffer_.numElements());
             fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
                     node->id_, node->buffer_.numElements());
-#endif
+            printElements();
+#endif  // CT_NODE_DEBUG
         }
-        pthread_mutex_unlock(&queueMutex_);
-#ifdef CT_NODE_DEBUG
-        for (int i = 0; i < nodes_.size(); ++i)
-            fprintf(stderr, "%d, ", nodes_[i]->id_);
-        fprintf(stderr, "\n");
-#endif
     }
 
 #ifdef ENABLE_PAGING
+
+    // Pager
+
     Pager::Pager(CompressTree* tree) :
             Slave(tree) {
     }
@@ -343,52 +428,24 @@ namespace cbt {
     }
 
 
-    void* Pager::work() {
-        pthread_mutex_lock(&queueMutex_);
-        pthread_barrier_wait(&tree_->threadsBarrier_);
-        while (nodes_.empty() && !inputComplete_) {
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "pager sleeping\n");
-#endif
-            queueEmpty_ = true;
-            pthread_cond_wait(&queueHasWork_, &queueMutex_);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "pager fingered\n");
-#endif
-            while (!nodes_.empty()) {
-                Node* n = nodes_.front();
-                nodes_.pop_front();
-                pthread_mutex_unlock(&queueMutex_);
-                bool suc = n->performPageAction();
-                pthread_mutex_lock(&queueMutex_);
-                if (!suc)
-                    nodes_.push_back(n);
-            }
-            /* check if anybody wants a notification when list is empty */
-            sendCompletionNotice();
-        }
-        pthread_mutex_unlock(&queueMutex_);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Pager quitting: %ld\n", nodes_.size());
-#endif
-        pthread_exit(NULL);
+    void Pager::work(Node* n) {
+        bool suc = n->performPageAction();
+        if (!suc)
+            addNodeToQueue(n);
     }
 
     void Pager::addNode(Node* node) {
         Buffer::PageAction act = node->getPageAction();
         if (act == Buffer::PAGE_OUT) {
-            pthread_mutex_lock(&queueMutex_);
-            nodes_.push_back(node);
+            addNodeToQueue(node);
         } else {
-            pthread_mutex_lock(&queueMutex_);
-            nodes_.push_front(node);
+            addNodeToQueue(node, /* toTail = */false);
         }
+
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d added to page list: ", node->id_);
         printElements();
-#endif
-        queueEmpty_ = false;
-        pthread_mutex_unlock(&queueMutex_);
+#endif  // CT_NODE_DEBUG
     }
 #endif  // ENABLE_PAGING
 
@@ -405,9 +462,9 @@ namespace cbt {
     Monitor::~Monitor() {
     }
 
-    void* Monitor::work() {
+    void Monitor::work(Node* n) {
         pthread_barrier_wait(&tree_->threadsBarrier_);
-        while (!inputComplete_) {
+        while (!inputComplete()) {
             sleep(1);
             elctr.push_back(numElements);
         }

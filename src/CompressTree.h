@@ -75,7 +75,7 @@ namespace cbt {
 
       private:
         friend class Node;
-        friend class Compressor;
+        friend class Slave;
         friend class Emptier;
         friend class Sorter;
         friend class Pager;

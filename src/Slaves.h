@@ -41,33 +41,89 @@ namespace cbt {
         explicit Slave(CompressTree* tree);
         virtual ~Slave() {}
         virtual void addNode(Node* node) = 0;
-        virtual bool empty() const;
-        virtual bool wakeup();
+        virtual bool empty();
+        virtual void wakeup();
         virtual void waitUntilCompletionNoticeReceived();
 
-        void startThreads();
+        void startThreads(uint32_t num = 1);
         void stopThreads();
 
       protected:
+        class ThreadStruct {
+          public:
+            ThreadStruct() {
+                pthread_cond_init(&hasWork_, NULL);
+                pthread_mutex_init(&mutex_, NULL);
+            }
+            bool wakeup();
+
+            uint32_t index_;
+            pthread_t* thread_;
+            pthread_cond_t hasWork_;
+            pthread_mutex_t mutex_;
+        };
+
+        // used to pass arguments to pthread execute function
+        typedef struct {
+            void* context;
+            ThreadStruct* desc;
+        } Pthread_args;
+
+        // check if all input is done
+        virtual bool inputComplete();
+
+        // get next node from (default: head of) queue or NULL if empty
+        virtual Node* getNextNode(bool fromHead = true);
+
+        // add node to (default: tail of) queue
+        virtual bool addNodeToQueue(Node* node, bool toTail = true);
+
         static void* callHelper(void* context);
+        // the pthread execution function. It extracts Nodes added by
+        // addNode() using getNextNode() and calls work(). Each of these
+        // functions can be specialized
+        virtual void slaveRoutine(ThreadStruct* t);
+
+        // check if someone has requested a completion signal.
+        // completion is defined as all threads being asleep
+        // and the queue being empty. This is requested only when
+        // the insertion thread completes input and blocks waiting
+        // for all Slaves to finish.
+        virtual void checkSendCompletionNotice();
+        virtual void setInputComplete(bool value);
+        bool checkInputComplete();
+        virtual void work(Node* n) = 0;
+
+        // Thread-mask related functions
+        void setThreadSleep(uint32_t index);
+        uint32_t getNumberOfSleepingThreads();
+
+#ifdef CT_NODE_DEBUG
+        // Debugging
+        virtual std::string getSlaveName() const = 0;
         virtual void printElements() const;
-        virtual void sendCompletionNotice();
-        virtual void setInputComplete(bool value) { inputComplete_ = value; }
-        virtual void* work() = 0;
+#endif  // CT_NODE_DEBUG
 
-        CompressTree* tree_;
-        bool inputComplete_;
-        bool queueEmpty_;
-
-        pthread_t thread_;
-        pthread_cond_t queueHasWork_;
-        pthread_mutex_t queueMutex_;
+        CompressTree* const tree_;
 
         pthread_mutex_t completionMutex_;
         pthread_cond_t complete_;
         bool askForCompletionNotice_;
 
+        uint32_t numThreads_;
+        std::vector<ThreadStruct> threads_;
+
+        pthread_spinlock_t maskLock_;
+        uint64_t tmask_;
+
+        pthread_spinlock_t nodesLock_;
+        // nodesLock_ protection begin
+            // never use the empty() member of the deque directly.
+            // instead, always use Slave::empty()
         std::deque<Node*> nodes_;
+        bool inputComplete_;
+        bool nodesEmpty_;
+        // nodesLock_ protection end
 
       private:
         friend class CompressTree;
@@ -83,8 +139,11 @@ namespace cbt {
       public:
         explicit Emptier(CompressTree* tree);
         ~Emptier();
-        void* work();
+        void work(Node* n);
         void addNode(Node* node);
+
+      protected:
+        virtual Node* getNextNode(bool fromHead = true);
 
       private:
         friend class CompressTree;
@@ -97,7 +156,7 @@ namespace cbt {
       public:
         explicit Compressor(CompressTree* tree);
         ~Compressor();
-        void* work();
+        void work(Node* n);
         void addNode(Node* node);
 
       private:
@@ -109,7 +168,7 @@ namespace cbt {
       public:
         explicit Sorter(CompressTree* tree);
         ~Sorter();
-        void* work();
+        void work(Node* n);
         void addNode(Node* node);
 
       private:
@@ -121,7 +180,7 @@ namespace cbt {
       public:
         explicit Pager(CompressTree* tree);
         ~Pager();
-        void* work();
+        void work(Node* n);
         void addNode(Node* node);
 
       private:
@@ -134,7 +193,7 @@ namespace cbt {
       public:
         explicit Monitor(CompressTree* tree);
         ~Monitor();
-        void* work();
+        void work(Node* n);
         void addNode(Node* n);
 
       private:
