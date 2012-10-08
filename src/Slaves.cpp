@@ -280,11 +280,7 @@ namespace cbt {
     Node* Emptier::getNextNode(bool fromHead) {
         Node* ret;
         pthread_spin_lock(&nodesLock_);
-        if (queue_.empty()) {
-            ret = false;
-        } else {
-            ret = queue_.pop();
-        }
+        ret = queue_.pop();
         pthread_spin_unlock(&nodesLock_);
         return ret;
     }
@@ -297,48 +293,14 @@ namespace cbt {
     }
 
     void Emptier::addNode(Node* node) {
-        if (node) {
-            pthread_spin_lock(&nodesLock_);
-            uint32_t prio;
-
-            // check if node is already present; this can happen because of the
-            // parent fetching a full child into the queue
-            if (queue_.contains(node)) {
-                pthread_spin_unlock(&nodesLock_);
-                return;
-            }
-
-            // if the parent of the node is already in the empty queue, we must
-            // empty the node before the parent, so we bump up the priority of
-            // the node
-            if (node->parent_ && (node->parent_->getQueueStatus() == EMPTY))
-                prio = queue_.priority(node->parent_) + 1;
-            else
-                prio = node->level();
-            queue_.insert(node, prio);
-
-            std::deque<Node*> depNodes;
-            depNodes.push_back(node);
-            while (!depNodes.empty()) {
-                Node* t = depNodes.front();
-                for (uint32_t i = 0; i < t->children_.size(); i++) {
-                    // also queue children (recursively) that may be paging in,
-                    // decompressing, sorting or emptying because these nodes
-                    // must be emptied first before t can empty
-                    if (t->children_[i]->getQueueStatus() <= EMPTY) {
-                        queue_.insert(t->children_[i], ++prio);
-                        depNodes.push_back(t->children_[i]);
-                    }
-                }
-                depNodes.pop_front();
-            }
+        pthread_spin_lock(&nodesLock_);
+        bool ret = queue_.insert(node);
         pthread_spin_unlock(&nodesLock_);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d (size: %u) added to to-empty list: ",
-                node->id_, node->buffer_.numElements());
+        fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to to-empty list: ",
+                node->id_, node->buffer_.numElements(), ret? "True" : "False");
         printElements();
 #endif
-        }
     }
 
     std::string Emptier::getSlaveName() const {

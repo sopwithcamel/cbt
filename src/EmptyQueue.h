@@ -24,8 +24,11 @@
 #ifndef SRC_EMPTYQUEUE_H_
 #define SRC_EMPTYQUEUE_H_
 #include <stdint.h>
+#include <deque>
 #include <list>
 #include <tr1/unordered_map>
+#include <queue>
+#include <vector>
 
 #include "Node.h"
 
@@ -41,72 +44,124 @@ namespace cbt {
             return (lhs->id() == rhs->id());
         }
     };
-    typedef std::tr1::unordered_map<Node*, uint32_t, NodeID, NodeEqual> PQ;
+
+    typedef struct {
+        Node* node;
+        uint32_t prio; // node priority
+    } NodeInfo;
+    struct NodeInfoCompare {
+        bool operator()(const NodeInfo* lhs, const NodeInfo* rhs) const {
+            return (lhs->prio < rhs->prio);
+        }
+    };
+
+    typedef std::tr1::unordered_map<Node*, std::deque<uint32_t>*, NodeID,
+            NodeEqual> DisabledDAG;
+    typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
+            NodeInfoCompare> EnabledPriorityQueue;
+
     class EmptyQueue {
       public:
         EmptyQueue() {}
         ~EmptyQueue() {}
 
-        void insert(Node* n, uint32_t prio) {
-            PQ::iterator it = nodeList_.find(n);
-            if (it == nodeList_.end())
-                nodeList_[n] = prio;
-            else if (it->second < prio)
-                it->second = prio;
-        }
-
-        Node* pop() {
-            PQ::iterator it = nodeList_.begin();
-            uint32_t maxPrio = it->second;
-            PQ::iterator maxNode = it;
-            ++it;
-            for (; it != nodeList_.end(); ++it) {
-                if (it->second > maxPrio) {
-                    maxNode = it;
-                    maxPrio = it->second;
+        // Insert element into queue. Returns true if the element is enabled to
+        // empty immediately or false otherwise
+        bool insert(Node* n) {
+            // check if all of the node's children have queueStatus_ >=
+            // COMPRESSED (i.e. COMPRESS, PAGEOUT or NONE).
+            bool canEmpty = true;
+            uint32_t i, s = n->children_.size();
+            std::deque<uint32_t>* d = new std::deque<uint32_t>();
+            for (i = 0; i < s; ++i) {
+                if (n->children_[i]->getQueueStatus() < COMPRESS) {
+                    canEmpty = false;
+                    d->push_back(n->children_[i]->id());
                 }
             }
-            Node* retNode = maxNode->first;
-            nodeList_.erase(maxNode);
-            return retNode;
+            //  If so, the node goes to the enabled queue
+            if (canEmpty) {
+                delete d;
+    
+                NodeInfo* ni = new NodeInfo();
+                ni->node = n;
+                ni->prio = n->level();
+                enabNodes_.push(ni);
+            } else { // disabled queue
+                disabNodes_[n] = d; 
+            }
+
+            // If parent is present, it has to be in disabled queue
+            // remove n from its parent's dependency list
+            if (n->parent_ && n->parent_->getQueueStatus() == EMPTY) {
+                std::deque<uint32_t>* ch = disabNodes_[n->parent_];
+                std::deque<uint32_t>::iterator it = ch->begin();
+                uint32_t n_id = n->id();
+                for ( ; it != ch->end(); ++it) {
+                    if (*it == n_id) {
+                        ch->erase(it);
+                        break;
+                    }
+                }
+                // if dependency list of parent is empty move parent to enabled
+                // queue
+                if (ch->empty()) {
+                    NodeInfo* np = new NodeInfo();
+                    np->node = n->parent_;
+                    np->prio = n->parent_->level();
+                    enabNodes_.push(np);
+
+                    delete ch;
+                    DisabledDAG::iterator t = disabNodes_.find(n->parent_);
+                    disabNodes_.erase(t); 
+                }
+            }
+            return canEmpty;
         }
 
-        void erase(Node* n) {
+        // Returns an enabled with maximum priority or NULL if the queue is
+        // empty
+        Node* pop() {
+            if (enabNodes_.empty())
+                return NULL;
+            NodeInfo* ret = enabNodes_.top();
+            enabNodes_.pop();
+            return ret->node;
         }
 
         bool empty() const {
-            return nodeList_.empty();
+            return enabNodes_.empty();
         }
 
-        bool contains(Node* n) const {
-            PQ::const_iterator it = nodeList_.find(n);
-            if (it != nodeList_.end())
-                return true;
-            return false;
-        }
-
-        uint32_t priority(Node* n) const {
-            PQ::const_iterator it = nodeList_.find(n);
-            return it->second;
-        }
-
-        size_t size() const {
-            return nodeList_.size();
-        }
 
         void printElements() {
-            for (PQ::const_iterator it = nodeList_.begin();
-                    it != nodeList_.end(); ++it) {
-                if (it->first->isRoot())
-                    fprintf(stderr, "%d(%d)*, ", it->first->id(), it->second);
+            fprintf(stderr, "EN: has %ld els.", enabNodes_.size());
+/*
+            for (EnabledPriorityQueue::iterator it = enabNodes_.begin();
+                    it != enabNodes_.end(); ++it) {
+                if (it->node->isRoot())
+                    fprintf(stderr, "%d(%d)*, ", it->node->id(), it->prio);
                 else
-                    fprintf(stderr, "%d(%d), ", it->first->id(), it->second);
+                    fprintf(stderr, "%d(%d), ", it->node->id(), it->prio);
+            }
+*/
+            fprintf(stderr, ", DIS: ");
+            for (DisabledDAG::iterator it = disabNodes_.begin();
+                    it != disabNodes_.end(); ++it) {
+                if (it->first->isRoot()) {
+                    fprintf(stderr, "%d(%ld)*, ", it->first->id(),
+                            it->second->size());
+                } else {
+                    fprintf(stderr, "%d(%ld), ", it->first->id(),
+                            it->second->size());
+                }
             }
             fprintf(stderr, "\n");
         }
 
       private:
-        PQ nodeList_;
+        EnabledPriorityQueue enabNodes_;
+        DisabledDAG disabNodes_;
     };
 }
 #endif  // SRC_EMPTYQUEUE_H_
