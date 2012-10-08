@@ -41,13 +41,17 @@ namespace cbt {
     class Sorter;
 
     enum Action {
-        NONE,
+#ifdef ENABLE_PAGING
+        PAGEIN,
+#endif  // ENABLE_PAGING
         DECOMPRESS,
-        COMPRESS,
         SORT,
         EMPTY,
+        COMPRESS,
+#ifdef ENABLE_PAGING
         PAGEOUT,
-        PAGEIN
+#endif  // ENABLE_PAGING
+        NONE
     };
 
     class Node {
@@ -158,13 +162,6 @@ namespace cbt {
         bool splitNonLeaf();
         bool checkIntegrity();
         bool checkSerializationIntegrity(int listn=-1);
-
-        /* Sorting-related functions */
-        void quicksort(uint32_t left, uint32_t right);
-
-        void schedule(const Action& act);
-        Action getQueueStatus();
-        void setQueueStatus(const Action& act);
         /* Compression-related functions */
 
         // return value indicates whether the node needs to be added or
@@ -172,14 +169,27 @@ namespace cbt {
         bool checkCompress();
         bool checkDecompress();
 
+        //
+        // management of queues
+        //
+        // Actually perform action. This assumes that it is ok to perform the
+        // action and does not check. For example, perform(SORT) will directly
+        // sort/merge the buffer. The caller has to ensure that the buffer is
+        // already decompressed.
+        void perform();
+        // Check if the node is currently queued up for Action act and
+        // block until receipt of signal indicating completion.
         void wait(const Action& act);
-        void performCompressAction();
-        Buffer::CompressionAction getCompressAction();
+        // Signal that Action act is complete.
+        void done(const Action& act);
+        // 
+        void schedule(const Action& act);
+        Action getQueueStatus();
+        void setQueueStatus(const Action& act);
 
 #ifdef ENABLE_PAGING
         /* Paging-related functions */
         void scheduleBufferPageAction(const Buffer::PageAction& act);
-        bool performPageAction();
         Buffer::PageAction getPageAction();
 #endif  // ENABLE_PAGING
 
@@ -202,15 +212,16 @@ namespace cbt {
         enum Action queueStatus_;
         pthread_spinlock_t queueStatusLock_;
 
-        // sort
+        pthread_cond_t emptyCond_;
+        pthread_mutex_t emptyMutex_;
+
         pthread_cond_t sortCond_;
-        pthread_mutex_t sortMutex_; 
+        pthread_mutex_t sortMutex_;
 
         pthread_cond_t compCond_;
         pthread_mutex_t compMutex_;
 
 #ifdef ENABLE_PAGING
-        PageAction pageAct_;
         pthread_cond_t pageCond_;
         pthread_mutex_t pageMutex_;
 #endif  // ENABLE_PAGING

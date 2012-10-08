@@ -44,7 +44,7 @@ namespace cbt {
               PAGE_OUT,
               PAGE_IN
           };
-#endif
+#endif  // ENABLE_PAGING
 
           class List {
             public:
@@ -96,10 +96,10 @@ namespace cbt {
 #ifdef ENABLE_PAGING
           void setupPaging();
           void cleanupPaging();
-#endif
+#endif  // ENABLE_PAGING
 
           /* Sorting-related */
-          void quicksort();
+          void quicksort(uint32_t left, uint32_t right);
           bool sort();
 
           /* Compression-related */
@@ -107,7 +107,6 @@ namespace cbt {
           bool decompress();
           void setCompressible(bool flag);
           void performCompressAction();
-          CompressionAction getCompressAction();
 
 #ifdef ENABLE_PAGING
           /* Paging-related */
@@ -120,7 +119,7 @@ namespace cbt {
           bool checkPageIn();
           bool performPageAction();
           PageAction getPageAction();
-#endif
+#endif  // ENABLE_PAGING
 
         private:
           const Node* node_;

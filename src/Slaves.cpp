@@ -290,49 +290,42 @@ namespace cbt {
     }
 
     void Emptier::work(Node* n) {
-        bool rootFlag = false;
-
-        pthread_mutex_lock(&n->queuedForEmptyMutex_);
-        n->queuedForEmptying_ = false;
-        pthread_mutex_unlock(&n->queuedForEmptyMutex_);
-
-        if (n->isRoot())
-            rootFlag = true;
-
-        if (n->isRoot()) {
-            n->aggregateSortedBuffer();
-        } else {
-            n->aggregateMergedBuffer();
-        }
-
-        n->emptyBuffer();
-        if (n->isLeaf())
-            tree_->handleFullLeaves();
-        if (rootFlag) {
-            // do the split and create new root
-            rootFlag = false;
-
-            pthread_mutex_lock(&tree_->rootNodeAvailableMutex_);
-            pthread_cond_signal(&tree_->rootNodeAvailableForWriting_);
-            pthread_mutex_unlock(&tree_->rootNodeAvailableMutex_);
-        }
+        n->wait(SORT);
+        n->perform();
+        // handle notifications
+        n->done(EMPTY);
     }
 
     void Emptier::addNode(Node* node) {
         if (node) {
-            // set queue status
-            setQueueStatus(EMPTY);
-
             pthread_spin_lock(&nodesLock_);
-            queue_.insert(node, node->level());
+            uint32_t prio;
+
+            // check if node is already present; this can happen because of the
+            // parent fetching a full child into the queue
+            if (queue_.contains(node)) {
+                pthread_spin_unlock(&nodesLock_);
+                return;
+            }
+
+            // if the parent of the node is already in the empty queue, we must
+            // empty the node before the parent, so we bump up the priority of
+            // the node
+            if (node->parent_ && (node->parent_->getQueueStatus() == EMPTY))
+                prio = queue_.priority(node->parent_) + 1;
+            else
+                prio = node->level();
+            queue_.insert(node, prio);
 
             std::deque<Node*> depNodes;
-            uint32_t prio = node->level();
             depNodes.push_back(node);
             while (!depNodes.empty()) {
                 Node* t = depNodes.front();
                 for (uint32_t i = 0; i < t->children_.size(); i++) {
-                    if (t->children_[i]->queuedForEmptying_) {
+                    // also queue children (recursively) that may be paging in,
+                    // decompressing, sorting or emptying because these nodes
+                    // must be emptied first before t can empty
+                    if (t->children_[i]->getQueueStatus() <= EMPTY) {
                         queue_.insert(t->children_[i], ++prio);
                         depNodes.push_back(t->children_[i]);
                     }
@@ -372,18 +365,18 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        n->perform();
-    }
-
-    void Compressor::addNode(Node* node) {
-        Buffer::CompressionAction act = node->getCompressAction();
-        if (act == Buffer::COMPRESS) {
-            addNodeToQueue(node);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "adding node %d to compress: ", node->id_);
-            printElements();
-#endif  // CT_NODE_DEBUG
+        Action act = n->getQueueStatus();
 #ifdef ENABLE_PAGING
+        if (act == DECOMPRESS)
+            n->wait(PAGEIN);
+#endif  // ENABLE_PAGING
+        n->perform();
+        // schedule to sort
+        if (act == DECOMPRESS) {
+            n->schedule(SORT);
+        } else {
+#ifdef ENABLE_PAGING
+            // TODO. This is most likely broken now
             /* Put in a request for paging out. This is necessary to do
              * right away because of the following case: if a page-in request
              * arrives when the node is on the compression queue waiting to
@@ -391,8 +384,24 @@ namespace cbt {
              * since there is no page-out request (yet). This leads to a case
              * where a decompression later assumes that the page-in has
              * completed */
-            node->scheduleBufferPageAction(Buffer::PAGE_OUT);
+            n->schedule(PAGEOUT);
+#else
+            // if no paging then set as not queued
+            n->setQueueStatus(NONE);
 #endif  // ENABLE_PAGING
+        }
+
+        n->done(act);
+    }
+
+    void Compressor::addNode(Node* node) {
+        Action act = node->getQueueStatus();
+        if (act == COMPRESS) {
+            addNodeToQueue(node);
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "adding node %d to compress: ", node->id_);
+            printElements();
+#endif  // CT_NODE_DEBUG
         } else {
 #ifdef ENABLE_PAGING
             node->scheduleBufferPageAction(Buffer::PAGE_IN);
@@ -422,24 +431,23 @@ namespace cbt {
     }
 
     void Sorter::work(Node* n) {
+        // block until buffer is decompressed
         n->wait(DECOMPRESS);
-        if (n->isRoot()) {
-            n->sortBuffer();
-        } else {
-            n->mergeBuffer();
-        }
-        tree_->emptier_->addNode(n);
-        tree_->emptier_->wakeup();
+        // perform sort or merge
+        n->perform();
+        // schedule for emptying
+        n->schedule(EMPTY);
+        // indicate that we're done sorting
+        n->done(SORT);
     }
 
     void Sorter::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
-            setQueueStatus(SORT);
             addNodeToQueue(node);
 
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Node %d added to to-sort list (size: %u)\n",
+            fprintf(stderr, "Node %d (size: %u) added to to-sort list: ",
                     node->id_, node->buffer_.numElements());
             printElements();
 #endif  // CT_NODE_DEBUG

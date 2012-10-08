@@ -83,37 +83,14 @@ namespace cbt {
     }
 
     Buffer::Buffer() :
-            compressible_(true),
-            queuedForCompAct_(false),
-            compAct_(NONE) {
-        pthread_mutex_init(&sortMutex_, NULL);
-        pthread_cond_init(&sortCond_, NULL);
-
-        pthread_mutex_init(&compActMutex_, NULL);
-        pthread_cond_init(&compActCond_, NULL);
-
+            compressible_(true) {
 #ifdef ENABLE_PAGING
-        pthread_mutex_init(&pageMutex_, NULL);
-        pthread_cond_init(&pageCond_, NULL);
-
         pageable_ = true;
-        queuedForPaging_ = false;
-        pageAct_ = NO_PAGE;
-#endif
+#endif  // ENABLE_PAGING
     }
 
     Buffer::~Buffer() {
         deallocate();
-
-        pthread_mutex_destroy(&sortMutex_);
-        pthread_cond_destroy(&sortCond_);
-
-        pthread_mutex_destroy(&compActMutex_);
-        pthread_cond_destroy(&compActCond_);
-#ifdef ENABLE_PAGING
-        pthread_mutex_destroy(&pageMutex_);
-        pthread_cond_destroy(&pageCond_);
-#endif
     }
 
     Buffer::List* Buffer::addList(bool isLarge/* = false */) {
@@ -306,7 +283,6 @@ namespace cbt {
 
         // quicksort elements
         quicksort(0, num - 1);
-        checkIntegrity();
         return true;
     }
 
@@ -324,7 +300,7 @@ namespace cbt {
 #ifdef ENABLE_PAGING
                 if (l->state_ == Buffer::List::PAGED_OUT)
                     continue;
-#endif
+#endif  // ENABLE_PAGING
                 compressed.addList();
                 // latest added list
                 Buffer::List* cl =
@@ -405,35 +381,8 @@ namespace cbt {
     }
 
     void Buffer::setCompressible(bool flag) {
-        pthread_mutex_lock(&compActMutex_);
+        // TODO Synchrnonization required
         compressible_ = flag;
-        pthread_mutex_unlock(&compActMutex_);
-    }
-
-    void Buffer::performCompressAction() {
-        pthread_mutex_lock(&compActMutex_);
-        if (compAct_ == COMPRESS) {
-            compress();
-            // signal to agent waiting for completion.
-        } else if (compAct_ == DECOMPRESS) {
-            pthread_mutex_unlock(&compActMutex_);
-#ifdef ENABLE_PAGING
-            wait(PAGE_IN);
-#endif
-            pthread_mutex_lock(&compActMutex_);
-            decompress();
-        }
-        pthread_cond_signal(&compActCond_);
-        queuedForCompAct_ = false;
-        compAct_ = NONE;
-        pthread_mutex_unlock(&compActMutex_);
-    }
-
-    Buffer::CompressionAction Buffer::getCompressAction() {
-        pthread_mutex_lock(&compActMutex_);
-        CompressionAction act = compAct_;
-        pthread_mutex_unlock(&compActMutex_);
-        return act;
     }
 
 #ifdef ENABLE_PAGING
@@ -441,7 +390,7 @@ namespace cbt {
         if (!empty()) {
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "paged out node %d; lists: ", node_->id_);
-#endif
+#endif  // CT_NODE_DEBUG
             for (uint32_t i = 0; i < lists_.size(); ++i) {
                 Buffer::List* l = lists_[i];
                 /* List may be already paged out or yet to be compressed */
@@ -461,18 +410,18 @@ namespace cbt {
                             "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
                             l->c_hashlen_, ret1, l->c_sizelen_, ret2,
                             l->c_datalen_, ret3);
-#endif
+#endif  // ENABLE_ASSERT_CHECKS
                 }
                 l->deallocate();
                 l->state_ = List::PAGED_OUT;
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
-#endif
+#endif  // CT_NODE_DEBUG
             }
         }
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "\n");
-#endif
+#endif  // CT_NODE_DEBUG
         return true;
     }
 
@@ -482,7 +431,7 @@ namespace cbt {
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "paged in node %d; lists: ", node_->id_);
-#endif
+#endif  // CT_NODE_DEBUG
 
         Buffer paged_in;
         for (uint32_t i = 0; i < lists_.size(); ++i) {
@@ -509,7 +458,7 @@ namespace cbt {
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
-#endif
+#endif  // CT_NODE_DEBUG
             l->hashes_ = pgin_list->hashes_;
             l->sizes_ = pgin_list->sizes_;
             l->data_ = pgin_list->data_;
@@ -517,7 +466,7 @@ namespace cbt {
         }
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "\n");
-#endif
+#endif  // CT_NODE_DEBUG
         // clear paged_in to prevent deallocation on return
         paged_in.clear();
 

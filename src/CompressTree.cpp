@@ -90,9 +90,12 @@ namespace cbt {
             inputNode_->checkSerializationIntegrity();
             pthread_mutex_lock(&rootNodeAvailableMutex_);
             while (!rootNode_->buffer_.empty() ||
-                    rootNode_->queuedForEmptying_) {
+                    rootNode_->getQueueStatus() != NONE) {
 #ifdef CT_NODE_DEBUG
-                fprintf(stderr, "inserter sleeping\n");
+                if (!rootNode_->buffer_.empty())
+                    fprintf(stderr, "inserter sleeping (buffer not empty)\n");
+                else
+                    fprintf(stderr, "inserter sleeping (queued somewhere)\n");
 #endif
                 pthread_cond_wait(&rootNodeAvailableForWriting_,
                         &rootNodeAvailableMutex_);
@@ -110,8 +113,7 @@ namespace cbt {
             pthread_mutex_unlock(&rootNodeAvailableMutex_);
 
             // schedule the root node for emptying
-            sorter_->addNode(rootNode_);
-            sorter_->wakeup();
+            rootNode_->schedule(SORT);
         }
         bool ret = inputNode_->insert(agg);
         return ret;
@@ -161,8 +163,8 @@ namespace cbt {
             Node* curLeaf = allLeaves_[0];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->scheduleBufferCompressAction(Buffer::DECOMPRESS);
-            curLeaf->waitForCompressAction(Buffer::DECOMPRESS);
+            curLeaf->schedule(DECOMPRESS);
+            curLeaf->wait(DECOMPRESS);
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -181,7 +183,7 @@ namespace cbt {
         lastElement_++;
 
         if (lastElement_ >= curLeaf->buffer_.numElements()) {
-            curLeaf->scheduleBufferCompressAction(Buffer::COMPRESS);
+            curLeaf->schedule(COMPRESS);
             if (++lastLeafRead_ == allLeaves_.size()) {
                 /* Wait for all outstanding compression work to finish */
                 compressor_->waitUntilCompletionNoticeReceived();
@@ -195,8 +197,8 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->scheduleBufferCompressAction(Buffer::DECOMPRESS);
-            n->waitForCompressAction(Buffer::DECOMPRESS);
+            n->schedule(DECOMPRESS);
+            n->wait(DECOMPRESS);
             lastOffset_ = 0;
             lastElement_ = 0;
         }
@@ -238,7 +240,7 @@ namespace cbt {
         // check if rootNode_ is available
         pthread_mutex_lock(&rootNodeAvailableMutex_);
         while (!rootNode_->buffer_.empty() ||
-                rootNode_->queuedForEmptying_) {
+                rootNode_->getQueueStatus() != NONE) {
             pthread_cond_wait(&rootNodeAvailableForWriting_,
                     &rootNodeAvailableMutex_);
         }
@@ -253,8 +255,7 @@ namespace cbt {
         inputNode_->buffer_.lists_ = temp.lists_;
         temp.clear();
 
-        sorter_->addNode(rootNode_);
-        sorter_->wakeup();
+        rootNode_->schedule(SORT);
 
         /* wait for all nodes to be sorted and emptied
            before proceeding */
@@ -327,23 +328,22 @@ namespace cbt {
             if (newLeaf && newLeaf->isFull()) {
                 l2 = newLeaf->splitLeaf();
             }
-            node->scheduleBufferCompressAction(Buffer::COMPRESS);
+            node->schedule(COMPRESS);
             if (newLeaf) {
-                newLeaf->scheduleBufferCompressAction(Buffer::COMPRESS);
+                newLeaf->schedule(COMPRESS);
             }
             if (l1) {
-                l1->scheduleBufferCompressAction(Buffer::COMPRESS);
+                l1->schedule(COMPRESS);
             }
             if (l2) {
-                l2->scheduleBufferCompressAction(Buffer::COMPRESS);
+                l2->schedule(COMPRESS);
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
                     node->id_);
 #endif
-            pthread_mutex_lock(&node->queuedForEmptyMutex_);
-            node->queuedForEmptying_ = false;
-            pthread_mutex_unlock(&node->queuedForEmptyMutex_);
+            // % WHY?
+            //node->setQueueStatus(NONE);
         }
     }
 
@@ -365,7 +365,7 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
-        uint32_t sorterThreadCount = 2;
+        uint32_t sorterThreadCount = 1;
         uint32_t compressorThreadCount = 1;
         uint32_t emptierThreadCount = 1;
 

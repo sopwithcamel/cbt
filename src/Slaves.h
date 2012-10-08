@@ -40,6 +40,7 @@ namespace cbt {
       public:
         explicit Slave(CompressTree* tree);
         virtual ~Slave() {}
+        // Responsible for managing queueStatus
         virtual void addNode(Node* node) = 0;
         virtual bool empty();
         virtual void wakeup();

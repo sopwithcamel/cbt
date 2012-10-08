@@ -78,6 +78,18 @@ namespace cbt {
             return nodeList_.empty();
         }
 
+        bool contains(Node* n) const {
+            PQ::const_iterator it = nodeList_.find(n);
+            if (it != nodeList_.end())
+                return true;
+            return false;
+        }
+
+        uint32_t priority(Node* n) const {
+            PQ::const_iterator it = nodeList_.find(n);
+            return it->second;
+        }
+
         size_t size() const {
             return nodeList_.size();
         }
