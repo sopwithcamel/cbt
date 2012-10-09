@@ -287,7 +287,16 @@ namespace cbt {
 
     void Emptier::work(Node* n) {
         n->wait(SORT);
+#ifdef CT_NODE_DEBUG
+        assert(n->getQueueStatus() == EMPTY);
+#endif  // CT_NODE_DEBUG
         n->perform();
+
+        // possibly enable parent etc.
+        pthread_spin_lock(&nodesLock_);
+        queue_.post(n);
+        pthread_spin_unlock(&nodesLock_);
+        
         // handle notifications
         n->done(EMPTY);
     }
@@ -328,15 +337,25 @@ namespace cbt {
 
     void Compressor::work(Node* n) {
         Action act = n->getQueueStatus();
+
 #ifdef ENABLE_PAGING
-        if (act == DECOMPRESS)
+        if (act == DECOMPRESS || act == DECOMPRESS_ONLY)
             n->wait(PAGEIN);
 #endif  // ENABLE_PAGING
+
+#ifdef CT_NODE_DEBUG
+        assert(act == DECOMPRESS || act == DECOMPRESS_ONLY || act == COMPRESS);
+#endif  // CT_NODE_DEBUG
+
         n->perform();
+
         // schedule to sort
         if (act == DECOMPRESS) {
             n->schedule(SORT);
-        } else {
+        } else if (act == DECOMPRESS_ONLY) {
+            // no further work if we're only decompressing
+            n->setQueueStatus(NONE);
+        } else if (act == COMPRESS) {
 #ifdef ENABLE_PAGING
             // TODO. This is most likely broken now
             /* Put in a request for paging out. This is necessary to do
@@ -364,7 +383,7 @@ namespace cbt {
             fprintf(stderr, "adding node %d to compress: ", node->id_);
             printElements();
 #endif  // CT_NODE_DEBUG
-        } else {
+        } else { // DECOMPRESS || DECOMPRESS_ONLY
 #ifdef ENABLE_PAGING
             node->scheduleBufferPageAction(Buffer::PAGE_IN);
 #endif  // ENABLE_PAGING
@@ -396,6 +415,10 @@ namespace cbt {
         // block until buffer is decompressed
         n->wait(DECOMPRESS);
         // perform sort or merge
+#ifdef CT_NODE_DEBUG
+        Action act = n->getQueueStatus();
+        assert(act == SORT);
+#endif  // CT_NODE_DEBUG
         n->perform();
         // schedule for emptying
         n->schedule(EMPTY);

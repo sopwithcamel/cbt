@@ -163,8 +163,8 @@ namespace cbt {
             Node* curLeaf = allLeaves_[0];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(DECOMPRESS);
-            curLeaf->wait(DECOMPRESS);
+            curLeaf->schedule(DECOMPRESS_ONLY);
+            curLeaf->wait(DECOMPRESS_ONLY);
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -197,8 +197,8 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(DECOMPRESS);
-            n->wait(DECOMPRESS);
+            n->schedule(DECOMPRESS_ONLY);
+            n->wait(DECOMPRESS_ONLY);
             lastOffset_ = 0;
             lastElement_ = 0;
         }

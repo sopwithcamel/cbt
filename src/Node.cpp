@@ -746,6 +746,7 @@ namespace cbt {
         switch(act) {
             case COMPRESS:
             case DECOMPRESS:
+            case DECOMPRESS_ONLY:
                 {
                     // Signal that we're done comp/decomp
                     pthread_mutex_unlock(&compMutex_);
@@ -777,6 +778,7 @@ namespace cbt {
         switch(act) {
             case COMPRESS:
             case DECOMPRESS:
+            case DECOMPRESS_ONLY:
                 {
                     bool add;
                     if (!buffer_.compressible_) {
@@ -786,7 +788,7 @@ namespace cbt {
                     if (act == COMPRESS) {
                         // check if node has to be added on queue
                         add = checkCompress();
-                    } else if (act == DECOMPRESS) {
+                    } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
                         // check if node has to be added on queue
                         add = checkDecompress();
                     } else {
@@ -831,7 +833,7 @@ namespace cbt {
             // nothing to be done
             setQueueStatus(NONE);
             ret = false;
-        } else if (act == DECOMPRESS) {
+        } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
             // check if node already queued as DECOMPRESS. This shouldn't
             // happen.
             fprintf(stderr, "Node %d trying to be compressed while\
@@ -857,17 +859,17 @@ namespace cbt {
             ret = false;
         } else if (act == COMPRESS) {
             // check if compression request is outstanding and cancel this */
-            setQueueStatus(DECOMPRESS);
+            setQueueStatus(act);
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d reset to decompress\n", id());
 #endif
             ret = false;
-        } else if (act == DECOMPRESS) {
+        } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
             // we're decompressing twice
             fprintf(stderr, "decompressing node %d twice", id());
             assert(false);
         } else { // NONE
-            setQueueStatus(DECOMPRESS);
+            setQueueStatus(act);
             ret = true;
         }
         return ret;
@@ -877,6 +879,7 @@ namespace cbt {
         switch (act) {
             case COMPRESS:
             case DECOMPRESS:
+            case DECOMPRESS_ONLY:
                 {
                     pthread_mutex_lock(&compMutex_);
                     while (getQueueStatus() == act)
@@ -924,10 +927,11 @@ namespace cbt {
         switch (act) {
             case COMPRESS:
             case DECOMPRESS:
+            case DECOMPRESS_ONLY:
                 {
                     if (act == COMPRESS) {
                         buffer_.compress();
-                    } else if (act == DECOMPRESS) {
+                    } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
 #ifdef ENABLE_PAGING
                         wait(PAGE_IN);
 #endif  // ENABLE_PAGING

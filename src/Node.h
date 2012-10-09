@@ -44,6 +44,7 @@ namespace cbt {
 #ifdef ENABLE_PAGING
         PAGEIN,
 #endif  // ENABLE_PAGING
+        DECOMPRESS_ONLY,
         DECOMPRESS,
         SORT,
         EMPTY,

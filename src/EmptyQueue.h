@@ -66,7 +66,7 @@ namespace cbt {
         ~EmptyQueue() {}
 
         // Insert element into queue. Returns true if the element is enabled to
-        // empty immediately or false otherwise
+        // empty immediately or false otherwise.
         bool insert(Node* n) {
             // check if all of the node's children have queueStatus_ >=
             // COMPRESSED (i.e. COMPRESS, PAGEOUT or NONE).
@@ -90,8 +90,27 @@ namespace cbt {
             } else { // disabled queue
                 disabNodes_[n] = d; 
             }
+            // There is no need to check if there is an active parent (which
+            // needs to be disabled). This is because at the time the parent
+            // was added, if a child hadn't begun the process of emptying, then
+            // it cannot do so (begin emptying) unless the parent empties.
+            // Therefore there is never a possibility of a node moving from the
+            // enabled to the disabled queue.
+            return canEmpty;
+        }
 
-            // If parent is present, it has to be in disabled queue
+        // Returns an enabled with maximum priority or NULL if the queue is
+        // empty
+        Node* pop() {
+            if (enabNodes_.empty())
+                return NULL;
+            NodeInfo* ret = enabNodes_.top();
+            enabNodes_.pop();
+            return ret->node;
+        }
+
+        void post(Node* n) {
+            // If parent is present, it must be in the disabled queue.
             // remove n from its parent's dependency list
             if (n->parent_ && n->parent_->getQueueStatus() == EMPTY) {
                 std::deque<uint32_t>* ch = disabNodes_[n->parent_];
@@ -116,17 +135,7 @@ namespace cbt {
                     disabNodes_.erase(t); 
                 }
             }
-            return canEmpty;
-        }
-
-        // Returns an enabled with maximum priority or NULL if the queue is
-        // empty
-        Node* pop() {
-            if (enabNodes_.empty())
-                return NULL;
-            NodeInfo* ret = enabNodes_.top();
-            enabNodes_.pop();
-            return ret->node;
+            
         }
 
         bool empty() const {
