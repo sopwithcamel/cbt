@@ -960,19 +960,16 @@ namespace cbt {
                 {
                     if (isRoot()) {
                         sortBuffer();
+                        aggregateSortedBuffer();
                     } else {
                         mergeBuffer();
+                        aggregateMergedBuffer();
                     }
                 }
                 break;
             case EMPTY:
                 {
                     bool rootFlag = isRoot();
-                    if (rootFlag) {
-                        aggregateSortedBuffer();
-                    } else {
-                        aggregateMergedBuffer();
-                    }
                     emptyBuffer();
                     if (isLeaf())
                         tree_->handleFullLeaves();
