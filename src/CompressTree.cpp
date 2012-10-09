@@ -73,49 +73,52 @@ namespace cbt {
 
     bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num) {
         bool ret = true;
-        for (uint64_t i = 0; i < num; ++i)
-            ret &= insert(paos[i]);
+        // copy buf into root node buffer
+        // root node buffer always decompressed
+        if (num > 0)
+            allFlush_ = false;
+        if (!threadsStarted_) {
+            startThreads();
+        }
+        for (uint64_t i = 0; i < num; ++i) {
+            PartialAgg* agg = paos[i];
+            if (inputNode_->isFull()) {
+                // check if rootNode_ is available
+                inputNode_->checkSerializationIntegrity();
+                pthread_mutex_lock(&rootNodeAvailableMutex_);
+                while (!rootNode_->buffer_.empty() ||
+                        rootNode_->getQueueStatus() != NONE) {
+#ifdef CT_NODE_DEBUG
+                    if (!rootNode_->buffer_.empty())
+                        fprintf(stderr, "inserter sleeping (buffer not empty)\n");
+                    else
+                        fprintf(stderr, "inserter sleeping (queued somewhere)\n");
+#endif
+                    pthread_cond_wait(&rootNodeAvailableForWriting_,
+                            &rootNodeAvailableMutex_);
+#ifdef CT_NODE_DEBUG
+                    fprintf(stderr, "inserter fingered\n");
+#endif
+                }
+                // switch buffers
+                Buffer temp;
+                temp.lists_ = rootNode_->buffer_.lists_;
+                rootNode_->buffer_.lists_ = inputNode_->buffer_.lists_;
+                inputNode_->buffer_.lists_ = temp.lists_;
+                temp.clear();
+
+                pthread_mutex_unlock(&rootNodeAvailableMutex_);
+
+                // schedule the root node for emptying
+                rootNode_->schedule(SORT);
+            }
+            ret &= inputNode_->insert(agg);
+        }
         return ret;
     }
 
     bool CompressTree::insert(PartialAgg* agg) {
-        // copy buf into root node buffer
-        // root node buffer always decompressed
-        allFlush_ = false;
-        if (!threadsStarted_) {
-            startThreads();
-        }
-        if (inputNode_->isFull()) {
-            // check if rootNode_ is available
-            inputNode_->checkSerializationIntegrity();
-            pthread_mutex_lock(&rootNodeAvailableMutex_);
-            while (!rootNode_->buffer_.empty() ||
-                    rootNode_->getQueueStatus() != NONE) {
-#ifdef CT_NODE_DEBUG
-                if (!rootNode_->buffer_.empty())
-                    fprintf(stderr, "inserter sleeping (buffer not empty)\n");
-                else
-                    fprintf(stderr, "inserter sleeping (queued somewhere)\n");
-#endif
-                pthread_cond_wait(&rootNodeAvailableForWriting_,
-                        &rootNodeAvailableMutex_);
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "inserter fingered\n");
-#endif
-            }
-            // switch buffers
-            Buffer temp;
-            temp.lists_ = rootNode_->buffer_.lists_;
-            rootNode_->buffer_.lists_ = inputNode_->buffer_.lists_;
-            inputNode_->buffer_.lists_ = temp.lists_;
-            temp.clear();
-
-            pthread_mutex_unlock(&rootNodeAvailableMutex_);
-
-            // schedule the root node for emptying
-            rootNode_->schedule(SORT);
-        }
-        bool ret = inputNode_->insert(agg);
+        bool ret = bulk_insert(&agg, 1);
         return ret;
     }
 
