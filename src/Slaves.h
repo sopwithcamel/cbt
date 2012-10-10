@@ -42,7 +42,11 @@ namespace cbt {
         virtual ~Slave() {}
         // Responsible for managing queueStatus
         virtual void addNode(Node* node) = 0;
+        // Returns true if there are no queued jobs and all threads are
+        // sleeping; false otherwise
         virtual bool empty();
+        // Returns true if there are queued jobs; false otherwise
+        virtual bool more();
         virtual void wakeup();
         virtual void waitUntilCompletionNoticeReceived();
 
@@ -131,7 +135,6 @@ namespace cbt {
         // nodesLock_ protection end
 
       private:
-        friend class CompressTree;
         friend class Node;
     };
 
@@ -146,15 +149,18 @@ namespace cbt {
         ~Emptier();
         void work(Node* n);
         void addNode(Node* node);
+        // sleeping; false otherwise
+        bool empty();
 
       protected:
-        bool empty();
+        // Returns true if there are no queued jobs and all threads are
+        // Returns true if there are queued jobs; false otherwise
+        bool more();
         virtual Node* getNextNode(bool fromHead = true);
         virtual std::string getSlaveName() const;
         void printElements();
 
       private:
-        friend class CompressTree;
         friend class Node;
 
         EmptyQueue queue_;
@@ -171,7 +177,6 @@ namespace cbt {
         virtual std::string getSlaveName() const;
 
       private:
-        friend class CompressTree;
         friend class Node;
     };
 
@@ -186,7 +191,6 @@ namespace cbt {
         virtual std::string getSlaveName() const;
 
       private:
-        friend class CompressTree;
         friend class Node;
     };
 
@@ -201,7 +205,6 @@ namespace cbt {
         virtual std::string getSlaveName() const;
 
       private:
-        friend class CompressTree;
         friend class Node;
     };
 
@@ -217,7 +220,6 @@ namespace cbt {
         virtual std::string getSlaveName() const;
 
       private:
-        friend class CompressTree;
         friend class Node;
         friend class Compressor;
 

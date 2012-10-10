@@ -44,9 +44,17 @@ namespace cbt {
 
     inline bool Slave::empty() {
         pthread_spin_lock(&nodesLock_);
-        bool ret = nodes_.empty();
+        bool ret = nodes_.empty() &&
+                (getNumberOfSleepingThreads() == numThreads_);
         pthread_spin_unlock(&nodesLock_);
         return ret;
+    }
+
+    inline bool Slave::more() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = nodes_.empty();
+        pthread_spin_unlock(&nodesLock_);
+        return !ret;
     }
 
     inline bool Slave::inputComplete() {
@@ -150,7 +158,7 @@ namespace cbt {
     }
 
     void Slave::waitUntilCompletionNoticeReceived() {
-        if (!empty()) {
+        while (!empty()) {
             pthread_mutex_lock(&completionMutex_);
             askForCompletionNotice_ = true;
             pthread_cond_wait(&complete_, &completionMutex_);
@@ -169,7 +177,7 @@ namespace cbt {
         // Things get messed up if some workers enter before all are created
         pthread_barrier_wait(&tree_->threadsBarrier_);
 
-        while (empty()) {
+        while (!more()) {
             // check if anybody wants a notification when list is empty
             checkSendCompletionNotice();
 
@@ -216,7 +224,7 @@ namespace cbt {
 
 #ifdef CT_NODE_DEBUG
     void Slave::printElements() {
-        if (empty()) {
+        if (!more()) {
             fprintf(stderr, "NULL\n");
             return;
         }
@@ -272,9 +280,17 @@ namespace cbt {
 
     bool Emptier::empty() {
         pthread_spin_lock(&nodesLock_);
-        bool ret = queue_.empty();
+        bool ret = queue_.empty() &&
+                (getNumberOfSleepingThreads() == numThreads_);
         pthread_spin_unlock(&nodesLock_);
         return ret;
+    }
+
+    bool Emptier::more() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = queue_.empty();
+        pthread_spin_unlock(&nodesLock_);
+        return !ret;
     }
 
     Node* Emptier::getNextNode(bool fromHead) {
@@ -317,7 +333,7 @@ namespace cbt {
     }
 
     void Emptier::printElements() {
-        if (empty()) {
+        if (!more()) {
             fprintf(stderr, "NULL\n");
             return;
         }
