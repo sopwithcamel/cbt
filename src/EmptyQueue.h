@@ -24,10 +24,10 @@
 #ifndef SRC_EMPTYQUEUE_H_
 #define SRC_EMPTYQUEUE_H_
 #include <stdint.h>
-#include <deque>
 #include <list>
 #include <tr1/unordered_map>
 #include <queue>
+#include <set>
 #include <vector>
 
 #include "Node.h"
@@ -55,7 +55,7 @@ namespace cbt {
         }
     };
 
-    typedef std::tr1::unordered_map<Node*, std::deque<uint32_t>*, NodeID,
+    typedef std::tr1::unordered_map<Node*, std::set<uint32_t>*, NodeID,
             NodeEqual> DisabledDAG;
     typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
             NodeInfoCompare> EnabledPriorityQueue;
@@ -72,11 +72,11 @@ namespace cbt {
             // COMPRESSED (i.e. COMPRESS, PAGEOUT or NONE).
             bool canEmpty = true;
             uint32_t i, s = n->children_.size();
-            std::deque<uint32_t>* d = new std::deque<uint32_t>();
+            std::set<uint32_t>* d = new std::set<uint32_t>();
             for (i = 0; i < s; ++i) {
                 if (n->children_[i]->getQueueStatus() < COMPRESS) {
                     canEmpty = false;
-                    d->push_back(n->children_[i]->id());
+                    d->insert(n->children_[i]->id());
                 }
             }
             //  If so, the node goes to the enabled queue
@@ -113,14 +113,10 @@ namespace cbt {
             // If parent is present, it must be in the disabled queue.
             // remove n from its parent's dependency list
             if (n->parent_ && n->parent_->getQueueStatus() == EMPTY) {
-                std::deque<uint32_t>* ch = disabNodes_[n->parent_];
-                std::deque<uint32_t>::iterator it = ch->begin();
-                uint32_t n_id = n->id();
-                for ( ; it != ch->end(); ++it) {
-                    if (*it == n_id) {
-                        ch->erase(it);
-                        break;
-                    }
+                std::set<uint32_t>* ch = disabNodes_[n->parent_];
+                std::set<uint32_t>::iterator it = ch->find(n->id());
+                if (it != ch->end()) { // found
+                    ch->erase(it);
                 }
                 // if dependency list of parent is empty move parent to enabled
                 // queue
