@@ -137,22 +137,6 @@ namespace cbt {
 
     bool CompressTree::nextValue(void*& hash, PartialAgg*& agg) {
         if (!allFlush_) {
-            /* wait for all nodes to be sorted and emptied
-               before proceeding */
-/*
-            do {
-#ifdef ENABLE_PAGING
-                pager_->waitUntilCompletionNoticeReceived();
-#endif
-                sorter_->waitUntilCompletionNoticeReceived();
-                emptier_->waitUntilCompletionNoticeReceived();
-#ifdef ENABLE_PAGING
-            } while (!sorter_->empty() || !emptier_->empty() ||
-                    !pager_->empty());
-#else
-            } while (!sorter_->empty() || !emptier_->empty());
-#endif
-*/
             flushBuffers();
             lastLeafRead_ = 0;
             lastOffset_ = 0;
@@ -263,16 +247,15 @@ namespace cbt {
         /* wait for all nodes to be sorted and emptied
            before proceeding */
         do {
+            sorter_->waitUntilCompletionNoticeReceived();
+            emptier_->waitUntilCompletionNoticeReceived();
+            compressor_->waitUntilCompletionNoticeReceived();
 #ifdef ENABLE_PAGING
             pager_->waitUntilCompletionNoticeReceived();
 #endif
-            sorter_->waitUntilCompletionNoticeReceived();
-            emptier_->waitUntilCompletionNoticeReceived();
-#ifdef ENABLE_PAGING
-        } while (!sorter_->empty() || !emptier_->empty() || !pager_->empty());
-#else
-        } while (!sorter_->empty() || !emptier_->empty());
-#endif
+        } while (!sorter_->empty() ||
+                !emptier_->empty() ||
+                !compressor_->empty());
 
         // add all leaves;
         visitQueue.push_back(rootNode_);
@@ -368,7 +351,7 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
-        uint32_t sorterThreadCount = 1;
+        uint32_t sorterThreadCount = 4;
         uint32_t compressorThreadCount = 1;
         uint32_t emptierThreadCount = 1;
 
