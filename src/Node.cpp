@@ -46,8 +46,9 @@ namespace cbt {
         id_ = tree_->nodeCtr++;
         buffer_.setParent(this);
 
-        tree_->ops->createPAO(NULL, &lastPAO);
-        tree_->ops->createPAO(NULL, &thisPAO);
+        // Check that PAOs are actually created
+        assert(1 == tree_->ops->createPAO(NULL, &lastPAO));
+        assert(1 == tree_->ops->createPAO(NULL, &thisPAO));
 
         pthread_mutex_init(&emptyMutex_, NULL);
         pthread_cond_init(&emptyCond_, NULL);
