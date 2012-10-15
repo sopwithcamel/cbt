@@ -42,7 +42,7 @@ namespace cbtservice {
 
         uint32_t number_of_paos = 100000;
 
-        for (int request_nbr = 0; request_nbr != 40; request_nbr++) {
+        for (int request_nbr = 0; ; request_nbr++) {
             std::stringstream ss;
             std::vector<TestPAO*> paos;
             GeneratePAOs(paos, number_of_paos);
@@ -98,7 +98,7 @@ namespace cbtservice {
             CodedOutputStream* cs) {
         std::vector<TestPAO*>::const_iterator it = paos.begin();
         
-        std::cout << "Wrote " << paos.size() << " PAOs" << std::endl;
+//        std::cout << "Wrote " << paos.size() << " PAOs" << std::endl;
         for ( ; it != paos.end(); ++it) {
             bool ret = to_->serialize(static_cast<PartialAgg*>(*it), cs);
         }

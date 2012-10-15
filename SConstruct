@@ -35,6 +35,14 @@ test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
 testapp = env.Program('test/testcbt', test_files,
             LIBS = ['-lgtest', '-lprotobuf', '-lpthread', '-lcbt', '-lsnappy'])
 
+client_files = ['service/Client.cpp', env.Object('service/PAO.pb.cc'), env.Object('service/TestApp.cpp')]
+client_app = env.Program('service/cbtclient', client_files,
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq'])
+
+server_files = ['service/Server.cpp', env.Object('service/PAO.pb.cc'), env.Object('service/TestApp.cpp')]
+server_app = env.Program('service/cbtserver', server_files,
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags'])
+
 ## Targets
 # build targets
 build = env.Alias('build', [cbtlib])
@@ -51,3 +59,6 @@ audit = env.Alias('audit', ['cppcheck'])
 
 # test
 test = env.Alias('test', [testapp])
+
+#service
+test = env.Alias('service', [client_app, server_app])

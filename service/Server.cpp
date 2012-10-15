@@ -1,7 +1,9 @@
 #include <assert.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <unistd.h>
 
+#include <gflags/gflags.h>
 #include <zmq.hpp>
 #include "zhelpers.hpp"
 #include <string>
@@ -12,6 +14,9 @@
 #include "TestApp.h"
 
 using namespace google::protobuf::io;
+using namespace std;
+
+DEFINE_bool(timed, false, "Do a timed run");
 
 namespace cbtservice {
     // Global static pointer used to ensure a single instance of the class.
@@ -27,15 +32,16 @@ namespace cbtservice {
     }
 
     void CBTServer::Start() {
-        instance_->Run();
+        Instance()->Run();
     }
 
     void CBTServer::Stop() {
-        delete instance_;
+        delete Instance();
     }
 
     CBTServer::CBTServer() :
-            kPAOsInsertAtTime(100000) {
+            kPAOsInsertAtTime(100000),
+            total_PAOs_inserted_(0) {
         uint32_t fanout = 8;
         uint32_t buffer_size = 31457280;
         uint32_t pao_size = 20;
@@ -68,11 +74,18 @@ namespace cbtservice {
             uint32_t num_received_PAOs;
 
             //  Wait for next request from client
-            std::string msg = s_recv(socket);
+            string msg = s_recv(socket);
 
             // Deserialize PAOs and insert into CBT
             ret = HandleMessage(msg, num_received_PAOs);
     
+            if (ret) {
+                total_PAOs_inserted_ += num_received_PAOs;
+//                cout << "Inserted " << total_PAOs_inserted_ << endl;
+            } else {
+                printf("ERROR\n");
+            }
+                
             //  Send reply back to client
             zmq::message_t reply (5);
             memcpy((void *)reply.data(), ret? "True" : "False", 5);
@@ -80,9 +93,9 @@ namespace cbtservice {
         }
     }
 
-    bool CBTServer::HandleMessage(const std::string& message,
+    bool CBTServer::HandleMessage(const string& message,
             uint32_t& num_PAOs) {
-        std::stringstream ss;
+        stringstream ss;
         ss << message;
         IstreamInputStream* ii = new IstreamInputStream(&ss);
         CodedInputStream* ci = new CodedInputStream(ii);
@@ -98,13 +111,28 @@ namespace cbtservice {
                 rem -= (to_->getSerializedSize(recv_paos_[to_insert]) + 1);
             }
             assert(cbt_->bulk_insert(recv_paos_, to_insert));
-            std::cout << "Inserted " << to_insert << " PAOs" << std::endl;
             num_PAOs += to_insert;
         } while (rem > 0);
+
+//        cout << "Inserted " << num_PAOs << " PAOs" << endl;
 
         delete ci;
         delete ii;
         return true;
+    }
+
+    void CBTServer::Timer() {
+        uint64_t last_PAOs_inserted = 0;
+        while (true) {
+            cout << (total_PAOs_inserted_ - last_PAOs_inserted) << endl;
+            last_PAOs_inserted = total_PAOs_inserted_;
+            sleep(1);
+        }
+    }
+
+    void* CBTServer::CallHelper(void*) {
+        Instance()->Timer();   
+        pthread_exit(NULL);
     }
 } // cbtservice
 
@@ -113,8 +141,27 @@ void INThandler(int sig) {
     exit(0);
 }
 
-int main () {
+int main (int argc, char** argv) {
+    // Define gflags options
+    google::ParseCommandLineFlags(&argc, &argv, true);
+
+    // Check if we are doing a timed run
+    if (FLAGS_timed) {
+        pthread_t timer_thread_;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        int rc = pthread_create(&timer_thread_, &attr,
+                cbtservice::CBTServer::CallHelper, NULL);
+        if (rc) {
+            cerr << "ERROR; return code from pthread_create() is "
+                    << rc << endl;
+            exit(-1);
+        }
+        sleep(1);
+    }
+
     signal(SIGINT, INThandler);
     cbtservice::CBTServer::Instance()->Start();   
+
     return 0;
 }

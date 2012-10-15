@@ -18,5 +18,7 @@
 *.dblite
 *.os
 
-# Test binaries
+# Binaries
 test/testcbt
+service/cbtserver
+service/cbtclient
