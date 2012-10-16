@@ -29,6 +29,7 @@
 #include <string.h>
 #include <string>
 #include <sstream>
+#include <vector>
 
 #define REGISTER(x)\
         extern "C" Operations* __libminni_create_ops()\
@@ -37,7 +38,15 @@
         }
 
 
-class Token;
+class Token {
+  public:
+	Token();
+	~Token();
+	void init(const Token&);
+	void clear();
+	std::vector<void*> tokens;
+	std::vector<size_t> token_sizes;
+};
 
 class PartialAgg {
   protected:

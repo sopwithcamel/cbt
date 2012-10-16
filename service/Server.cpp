@@ -22,20 +22,24 @@
 // Author: Hrishikesh Amur
 
 #include <assert.h>
+#include <dlfcn.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include <gflags/gflags.h>
-#include<gperftools/heap-profiler.h>
+#include <gperftools/heap-profiler.h>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <zmq.hpp>
 #include "zhelpers.hpp"
 #include <string>
 #include <iostream>
 
 #include "CompressTree.h"
+#include "PartialAgg.h"
+#include "ProtobufPartialAgg.h"
 #include "Server.h"
-#include "TestApp.h"
 
 using namespace google::protobuf::io;
 using namespace std;
@@ -66,7 +70,8 @@ namespace cbtservice {
 
         // flushing tree
         int hash; void* ptr = reinterpret_cast<void*>(&hash);
-        PartialAgg* test = new TestPAO("", 0);
+        PartialAgg* test;
+        to_->createPAO(NULL, &test);
         cbt_->nextValue(ptr, test);
         sleep(2);
         cbt_->clear();
@@ -80,14 +85,18 @@ namespace cbtservice {
         uint32_t fanout = 8;
         uint32_t buffer_size = 31457280;
         uint32_t pao_size = 20;
-        to_ = new TestOperations();
+
+        // First create an Operations object
+        assert(LinkUserMap());
+
         cbt_ = new cbt::CompressTree(2, fanout, 1000, buffer_size, pao_size,
                 to_);
 
         recv_paos_ = reinterpret_cast<PartialAgg**>(malloc(sizeof(PartialAgg*)
                 * kPAOsInsertAtTime));
-        for (uint32_t i = 0; i < kPAOsInsertAtTime; ++i)
-            recv_paos_[i] = new TestPAO("", 0);
+        for (uint32_t i = 0; i < kPAOsInsertAtTime; ++i) {
+            to_->createPAO(NULL, &recv_paos_[i]);
+        }
     }
 
     CBTServer::~CBTServer() {
@@ -142,7 +151,8 @@ namespace cbtservice {
             for ( ; to_insert < kPAOsInsertAtTime; ++to_insert) {
                 if (rem == 0)
                     break;
-                assert(to_->deserialize(recv_paos_[to_insert], ci));
+                assert(static_cast<ProtobufOperations*>(to_)->deserialize(
+                        recv_paos_[to_insert], ci));
                 rem -= (to_->getSerializedSize(recv_paos_[to_insert]) + 1);
             }
             assert(cbt_->bulk_insert(recv_paos_, to_insert));
@@ -153,6 +163,27 @@ namespace cbtservice {
 
         delete ci;
         delete ii;
+        return true;
+    }
+
+    bool CBTServer::LinkUserMap() { 
+        const char* err;
+        void* handle;
+        std::string soname = "/usr/local/lib/minni/wc_proto.so";
+        handle = dlopen(soname.c_str(), RTLD_LAZY);
+        if (!handle) {
+            fputs(dlerror(), stderr);
+            return false;
+        }
+
+        Operations* (*create_ops_obj)() = (Operations* (*)())dlsym(handle,
+                "__libminni_create_ops");
+        if ((err = dlerror()) != NULL) {
+            fprintf(stderr, "Error locating symbol __libminni_create_ops\
+                    in %s\n", err);
+            exit(-1);
+        }
+        to_ = create_ops_obj();
         return true;
     }
 

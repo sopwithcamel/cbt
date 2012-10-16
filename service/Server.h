@@ -27,7 +27,6 @@
 #include <stdint.h>
 
 #include "CompressTree.h"
-#include "TestApp.h"
 
 namespace cbtservice {
     class CBTServer {
@@ -43,13 +42,14 @@ namespace cbtservice {
         ~CBTServer();
         bool HandleMessage(const std::string& message,
                 uint32_t& num_PAOs);
+        bool LinkUserMap();
         void Run();
         void Timer();
 
         static CBTServer* instance_;
         bool stop_server_;
         cbt::CompressTree* cbt_;
-        TestOperations* to_;
+        Operations* to_;
         PartialAgg** recv_paos_;
 
         uint64_t total_PAOs_inserted_;
