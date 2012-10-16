@@ -63,7 +63,17 @@ namespace cbt {
     class EmptyQueue {
       public:
         EmptyQueue() {}
-        ~EmptyQueue() {}
+        ~EmptyQueue() {
+            DisabledDAG::iterator it = disabNodes_.begin();
+            for ( ; it != disabNodes_.end(); ++it) {
+                delete it->second;
+            }
+            while (!enabNodes_.empty()) {
+                NodeInfo* n = enabNodes_.top();
+                enabNodes_.pop();
+                delete n;
+            }
+        }
 
         // Insert element into queue. Returns true if the element is enabled to
         // empty immediately or false otherwise.
@@ -106,7 +116,9 @@ namespace cbt {
                 return NULL;
             NodeInfo* ret = enabNodes_.top();
             enabNodes_.pop();
-            return ret->node;
+            Node* ret_node = ret->node;
+            delete ret;
+            return ret_node;
         }
 
         void post(Node* n) {
