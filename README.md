@@ -6,6 +6,7 @@ cbt
 * [Google protobufs](http://code.google.com/p/protobuf/)
 * [Google test](http://code.google.com/p/googletest/)
 * [Snappy](http://code.google.com/p/snappy/)
+* [jemalloc](http://www.canonware.com/jemalloc/)
 * Pthreads
 
 ## Additional for server ##
