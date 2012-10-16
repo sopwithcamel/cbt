@@ -47,6 +47,7 @@ namespace cbtservice {
         void Timer();
 
         static CBTServer* instance_;
+        bool stop_server_;
         cbt::CompressTree* cbt_;
         TestOperations* to_;
         PartialAgg** recv_paos_;

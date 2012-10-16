@@ -41,7 +41,7 @@ client_app = env.Program('service/cbtclient', client_files,
 
 server_files = ['service/Server.cpp', env.Object('service/PAO.pb.cc'), env.Object('service/TestApp.cpp')]
 server_app = env.Program('service/cbtserver', server_files,
-            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags'])
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ltcmalloc'])
 
 ## Targets
 # build targets

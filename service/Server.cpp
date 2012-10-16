@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include <gflags/gflags.h>
+#include<gperftools/heap-profiler.h>
 #include <zmq.hpp>
 #include "zhelpers.hpp"
 #include <string>
@@ -40,6 +41,7 @@ using namespace google::protobuf::io;
 using namespace std;
 
 DEFINE_bool(timed, false, "Do a timed run");
+DEFINE_bool(heapcheck, false, "Heap check");
 
 namespace cbtservice {
     // Global static pointer used to ensure a single instance of the class.
@@ -59,11 +61,15 @@ namespace cbtservice {
     }
 
     void CBTServer::Stop() {
+        stop_server_ = true;
+        fprintf(stderr, "Stopping Server...\n");
+        sleep(2);
         delete Instance();
     }
 
     CBTServer::CBTServer() :
             kPAOsInsertAtTime(100000),
+            stop_server_(false),
             total_PAOs_inserted_(0) {
         uint32_t fanout = 8;
         uint32_t buffer_size = 31457280;
@@ -92,7 +98,7 @@ namespace cbtservice {
         zmq::socket_t socket (context, ZMQ_REP);
         socket.bind ("tcp://*:5555");
 
-        while (true) {
+        while (!stop_server_) {
             bool ret;
             uint32_t num_received_PAOs;
 
@@ -146,7 +152,7 @@ namespace cbtservice {
 
     void CBTServer::Timer() {
         uint64_t last_PAOs_inserted = 0;
-        while (true) {
+        while (!stop_server_) {
             cout << (total_PAOs_inserted_ - last_PAOs_inserted) << endl;
             last_PAOs_inserted = total_PAOs_inserted_;
             sleep(1);
@@ -184,7 +190,13 @@ int main (int argc, char** argv) {
     }
 
     signal(SIGINT, INThandler);
+
+    if (FLAGS_heapcheck)
+        HeapProfilerStart("/tmp/cbtserver");
+
     cbtservice::CBTServer::Instance()->Start();   
 
+    if (FLAGS_heapcheck)
+        HeapProfilerStop();
     return 0;
 }
