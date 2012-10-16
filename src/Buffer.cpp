@@ -33,6 +33,8 @@
 #include "snappy.h"
 
 namespace cbt {
+    uint64_t Buffer::List::allocated_lists = 0;
+
     Buffer::List::List() :
             hashes_(NULL),
             sizes_(NULL),
@@ -59,6 +61,8 @@ namespace cbt {
         hashes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
         sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
         data_ = reinterpret_cast<char*>(malloc(buf));
+
+//        fprintf(stderr, "AL: %ld\n", ++allocated_lists);
     }
 
     void Buffer::List::deallocate() {
@@ -74,6 +78,7 @@ namespace cbt {
             free(data_);
             data_ = NULL;
         }
+//        fprintf(stderr, "AL: %ld\n", --allocated_lists);
     }
 
     void Buffer::List::setEmpty() {
@@ -117,7 +122,8 @@ namespace cbt {
 
     void Buffer::deallocate() {
         for (uint32_t i = 0; i < lists_.size(); ++i)
-            lists_[i]->deallocate();
+            delete lists_[i];
+        lists_.clear();
     }
 
     bool Buffer::empty() const {

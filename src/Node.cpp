@@ -253,7 +253,6 @@ namespace cbt {
 
             if (!isRoot()) {
                 buffer_.deallocate();
-                buffer_.clear();
             }
         }
         // Split leaves can cause the number of children to increase. Check.
@@ -411,7 +410,6 @@ namespace cbt {
         // clear buffer and copy over aux.
         // aux itself is on the stack and will be destroyed
         buffer_.deallocate();
-        buffer_.clear();
         buffer_.lists_ = aux.lists_;
         aux.clear();
         checkSerializationIntegrity();
@@ -518,7 +516,6 @@ namespace cbt {
         // clear buffer and copy over aux.
         // aux itself is on the stack and will be destroyed
         buffer_.deallocate();
-        buffer_.clear();
         buffer_.lists_ = aux.lists_;
         aux.clear();
         return true;
@@ -709,7 +706,6 @@ namespace cbt {
             buffer_.setPageable(true);
 #endif  // ENABLE_PAGING
             buffer_.deallocate();
-            buffer_.clear();
             return tree_->createNewRoot(newNode);
         } else {
             return parent_->addChild(newNode);
