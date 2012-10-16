@@ -29,7 +29,8 @@ prefix = '/usr/local'
 
 env.Append(CCFLAGS = ['-g','-O2','-Wall'],
             CPPFLAGS = ['-Isrc/', '-Iutil/', '-Icommon'])
-cbtlib = env.SharedLibrary('cbt', src_files)
+cbtlib = env.SharedLibrary('cbt', src_files,
+            LIBS = ['-ljemalloc'])
 
 test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
 testapp = env.Program('test/testcbt', test_files,
@@ -41,7 +42,7 @@ client_app = env.Program('service/cbtclient', client_files,
 
 server_files = ['service/Server.cpp', env.Object('common/PartialAgg.cpp')]
 server_app = env.Program('service/cbtserver', server_files,
-            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ltcmalloc', '-ldl'])
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ljemalloc', '-ldl'])
 
 ## Targets
 # build targets
