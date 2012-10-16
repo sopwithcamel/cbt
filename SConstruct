@@ -23,19 +23,19 @@ def Utility(target, source, action):
     env.Precious(target)
     return target
 
-src_files = Glob('src/*.cpp')
+src_files = [Glob('src/*.cpp'), Glob('util/*.cpp')]
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
 
 env.Append(CCFLAGS = ['-g','-O2','-Wall'],
-            CPPFLAGS = ['-Isrc/'])
+            CPPFLAGS = ['-Isrc/', '-Iutil/'])
 cbtlib = env.SharedLibrary('cbt', src_files)
 
 test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
 testapp = env.Program('test/testcbt', test_files,
             LIBS = ['-lgtest', '-lprotobuf', '-lpthread', '-lcbt', '-lsnappy'])
 
-client_files = ['service/Client.cpp', env.Object('service/PAO.pb.cc'), env.Object('service/TestApp.cpp')]
+client_files = ['service/Client.cpp', env.Object('service/PAO.pb.cc'), env.Object('service/TestApp.cpp'), env.Object('util/HashUtil.cpp')]
 client_app = env.Program('service/cbtclient', client_files,
             LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq'])
 
