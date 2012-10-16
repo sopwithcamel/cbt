@@ -336,7 +336,7 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "compressed list %d in node %d\n",
                         i, node_->id_);
-#endif
+#endif  // CT_NODE_DEBUG
             }
             // clear compressed list so lists won't be deallocated on return
             compressed.clear();
@@ -381,7 +381,7 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "decompressed node %d; n: %u\n",
                     node_->id_, numElements());
-#endif
+#endif  // CT_NODE_DEBUG
         }
         return true;
     }
@@ -459,7 +459,7 @@ namespace cbt {
                         "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
                         l->c_hashlen_, ret1, l->c_sizelen_, ret2,
                         l->c_datalen_, ret3);
-#endif
+#endif  // ENABLE_ASSERT_CHECKS
                 assert(false);
             }
 #ifdef CT_NODE_DEBUG
