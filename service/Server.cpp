@@ -230,12 +230,16 @@ int main (int argc, char** argv) {
 
     signal(SIGINT, INThandler);
 
+/*
     if (FLAGS_heapcheck)
         HeapProfilerStart("/tmp/cbtserver");
+*/
 
     cbtservice::CBTServer::Instance()->Start();   
 
+/*
     if (FLAGS_heapcheck)
         HeapProfilerStop();
+*/
     return 0;
 }
