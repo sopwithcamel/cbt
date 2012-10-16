@@ -21,6 +21,7 @@
 // ---
 // Author: Hrishikesh Amur
 
+#include <dlfcn.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -32,13 +33,12 @@
 
 #include "Client.h"
 #include "HashUtil.h"
-#include "TestApp.h"
+#include "PartialAgg.h"
+#include "ProtobufPartialAgg.h"
 
 using namespace google::protobuf::io;
 
 namespace cbtservice {
-    class TestOperations;
-    class TestPAO;
 
     CBTClient::CBTClient(uint32_t u, uint32_t l) :
             kNumUniqKeys(u),
@@ -48,7 +48,8 @@ namespace cbtservice {
             kMaxPAOs(200000) {
         num_full_loops_ = (int)floor(Conv26(log2(kNumUniqKeys)));
         part_loop_ = (int)ceil(kNumUniqKeys / pow(26, num_full_loops_));
-        to_ = new TestOperations();
+
+        assert(LinkUserMap());
 
         GenerateFillers(kKeyLen - num_full_loops_);
     }
@@ -68,7 +69,7 @@ namespace cbtservice {
 
         for (int request_nbr = 0; ; request_nbr++) {
             std::stringstream ss;
-            std::vector<TestPAO*> paos;
+            std::vector<PartialAgg*> paos;
             GeneratePAOs(paos, number_of_paos);
 
             OstreamOutputStream* os = new OstreamOutputStream(&ss);
@@ -99,40 +100,70 @@ namespace cbtservice {
         }
     }
 
-    void CBTClient::GeneratePAOs(std::vector<TestPAO*>& paos,
+    void CBTClient::GeneratePAOs(std::vector<PartialAgg*>& paos,
             uint32_t number_of_paos) {
-        std::string word;
+        char* word = new char[kKeyLen + 1];
         assert(number_of_paos < kMaxPAOs);
+        Token t;
         for (uint32_t i = 0; i < number_of_paos; ++i) {
             for (uint32_t j=0; j < num_full_loops_; j++)
                 word[j] = 97 + rand() % kLettersInAlphabet;
             word[num_full_loops_] = 97 + rand() % part_loop_;
+            word[num_full_loops_ + 1] = '\0';
 
             uint32_t filler_number = HashUtil::MurmurHash(word, 42)
                     % kNumFillers;
 
-            word += fillers_[filler_number].substr(0, kKeyLen -
+            strncat(word, fillers_[filler_number].c_str(), kKeyLen -
                     num_full_loops_ - 1);
-            TestPAO* t = new TestPAO(word.c_str(), 1);
-            paos.push_back(t);
-            word.clear();
+
+            t.tokens.push_back(word);
+            PartialAgg* agg;
+            // TODO: Fix foolishness
+            to_->createPAO(NULL, &agg);
+            to_->createPAO(&t, &agg);
+            paos.push_back(agg);
+            t.clear();
         }
+        delete[] word;
     }
 
-    void CBTClient::SerializePAOs(const std::vector<TestPAO*>& paos,
+    bool CBTClient::LinkUserMap() { 
+        const char* err;
+        void* handle;
+        std::string soname = "/usr/local/lib/minni/wc_proto.so";
+        handle = dlopen(soname.c_str(), RTLD_LAZY);
+        if (!handle) {
+            fputs(dlerror(), stderr);
+            return false;
+        }
+
+        Operations* (*create_ops_obj)() = (Operations* (*)())dlsym(handle,
+                "__libminni_create_ops");
+        if ((err = dlerror()) != NULL) {
+            fprintf(stderr, "Error locating symbol __libminni_create_ops\
+                    in %s\n", err);
+            exit(-1);
+        }
+        to_ = create_ops_obj();
+        return true;
+    }
+
+    void CBTClient::SerializePAOs(const std::vector<PartialAgg*>& paos,
             CodedOutputStream* cs) {
-        std::vector<TestPAO*>::const_iterator it = paos.begin();
+        std::vector<PartialAgg*>::const_iterator it = paos.begin();
         
 //        std::cout << "Wrote " << paos.size() << " PAOs" << std::endl;
         for ( ; it != paos.end(); ++it) {
-            bool ret = to_->serialize(static_cast<PartialAgg*>(*it), cs);
+            bool ret = static_cast<ProtobufOperations*>(to_)->serialize(
+                    static_cast<PartialAgg*>(*it), cs);
         }
     }
 
-    void CBTClient::DeletePAOs(const std::vector<TestPAO*>& paos) {
-        std::vector<TestPAO*>::const_iterator it = paos.begin();
+    void CBTClient::DeletePAOs(const std::vector<PartialAgg*>& paos) {
+        std::vector<PartialAgg*>::const_iterator it = paos.begin();
         for ( ; it != paos.end(); ++it) {
-           delete (*it);
+           to_->destroyPAO(*it);
         }
     }
 } // cbtservice

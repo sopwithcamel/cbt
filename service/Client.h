@@ -29,9 +29,10 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 
-#include "TestApp.h"
+#include "PartialAgg.h"
 
 namespace cbtservice {
+
     class CBTClient {
       public:
         CBTClient(uint32_t u, uint32_t l);
@@ -51,12 +52,13 @@ namespace cbtservice {
         }
 
         void GenerateFillers(uint32_t filler_len);
-        void GeneratePAOs(std::vector<TestPAO*>& paos, uint32_t number_of_paos);
-        void SerializePAOs(const std::vector<TestPAO*>& paos,
+        void GeneratePAOs(std::vector<PartialAgg*>& paos, uint32_t number_of_paos);
+        bool LinkUserMap();
+        void SerializePAOs(const std::vector<PartialAgg*>& paos,
                 google::protobuf::io::CodedOutputStream* cs);
-        void DeletePAOs(const std::vector<TestPAO*>& paos);
+        void DeletePAOs(const std::vector<PartialAgg*>& paos);
 
-        TestOperations* to_;
+        Operations* to_;
 
         // dataset generation
         std::vector<std::string> fillers_;
