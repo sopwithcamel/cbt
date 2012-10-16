@@ -72,6 +72,7 @@ namespace cbt {
         bool bulk_read(PartialAgg** pao_list, uint64_t& num_read,
                 uint64_t max);
         bool nextValue(void*& hash, PartialAgg*& agg);
+        void clear();
 
       private:
         friend class Node;

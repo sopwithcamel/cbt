@@ -193,6 +193,11 @@ namespace cbt {
         return true;
     }
 
+    void CompressTree::clear() {
+        emptyTree();
+        stopThreads();
+    }
+
     void CompressTree::emptyTree() {
         std::deque<Node*> delList1;
         std::deque<Node*> delList2;
