@@ -61,7 +61,7 @@ namespace cbtservice {
         Operations* to_;
 
         // dataset generation
-        std::vector<std::string> fillers_;
+        std::vector<char*> fillers_;
         uint32_t num_full_loops_;
         uint32_t part_loop_; 
     };

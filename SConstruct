@@ -35,11 +35,11 @@ test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
 testapp = env.Program('test/testcbt', test_files,
             LIBS = ['-lgtest', '-lprotobuf', '-lpthread', '-lcbt', '-lsnappy'])
 
-client_files = ['service/Client.cpp', env.Object('service/PAO.pb.cc'), env.Object('common/PartialAgg.cpp'), env.Object('util/HashUtil.cpp')]
+client_files = ['service/Client.cpp', env.Object('common/PartialAgg.cpp'), env.Object('util/HashUtil.cpp')]
 client_app = env.Program('service/cbtclient', client_files,
             LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-ldl'])
 
-server_files = ['service/Server.cpp', env.Object('service/PAO.pb.cc'), env.Object('common/PartialAgg.cpp')]
+server_files = ['service/Server.cpp', env.Object('common/PartialAgg.cpp')]
 server_app = env.Program('service/cbtserver', server_files,
             LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ltcmalloc', '-ldl'])
 

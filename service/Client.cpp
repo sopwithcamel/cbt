@@ -51,10 +51,12 @@ namespace cbtservice {
 
         assert(LinkUserMap());
 
-        GenerateFillers(kKeyLen - num_full_loops_);
+        GenerateFillers(kKeyLen - num_full_loops_ - 1);
     }
 
     CBTClient::~CBTClient() {
+        for (uint32_t i = 0; i < kNumFillers; ++i)
+            delete[] fillers_[i];
     }
 
     void CBTClient::Run() {
@@ -93,9 +95,10 @@ namespace cbtservice {
 
     void CBTClient::GenerateFillers(uint32_t filler_len) {
         for (uint32_t i = 0; i < kNumFillers; ++i) {
-            std::string f;
+            char* f = new char[filler_len + 1];
             for (uint32_t j = 0; j < filler_len; ++j)
                 f[j] = 97 + rand() % kLettersInAlphabet;
+            f[filler_len] = '\0';
             fillers_.push_back(f);
         }
     }
@@ -111,10 +114,11 @@ namespace cbtservice {
             word[num_full_loops_] = 97 + rand() % part_loop_;
             word[num_full_loops_ + 1] = '\0';
 
-            uint32_t filler_number = HashUtil::MurmurHash(word, 42)
-                    % kNumFillers;
+            uint32_t filler_number = HashUtil::MurmurHash(word,
+                    strlen(word), 42) % kNumFillers;
+//            fprintf(stderr, "%d, %s\n", filler_number, fillers_[filler_number]);
 
-            strncat(word, fillers_[filler_number].c_str(), kKeyLen -
+            strncat(word, fillers_[filler_number], kKeyLen -
                     num_full_loops_ - 1);
 
             t.tokens.push_back(word);
