@@ -55,8 +55,9 @@ namespace cbtservice {
     // constructor publicly is not allowed. The constructor is private and is
     // only called by this Instance function.
     CBTServer* CBTServer::Instance() {
-        if (!instance_)   // Only allow one instance of class to be generated.
+        if (!instance_) {   // Only allow one instance of class to be generated.
             instance_ = new CBTServer();
+        }
         return instance_;
     }
 
@@ -91,6 +92,7 @@ namespace cbtservice {
 
         cbt_ = new cbt::CompressTree(2, fanout, 1000, buffer_size, pao_size,
                 to_);
+        fprintf(stderr, "CBTServer created\n");
 
         recv_paos_ = reinterpret_cast<PartialAgg**>(malloc(sizeof(PartialAgg*)
                 * kPAOsInsertAtTime));
