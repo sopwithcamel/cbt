@@ -63,7 +63,13 @@ namespace cbtservice {
     void CBTServer::Stop() {
         stop_server_ = true;
         fprintf(stderr, "Stopping Server...\n");
+
+        // flushing tree
+        int hash; void* ptr = reinterpret_cast<void*>(&hash);
+        PartialAgg* test = new TestPAO("", 0);
+        cbt_->nextValue(ptr, test);
         sleep(2);
+        cbt_->clear();
         delete Instance();
     }
 
