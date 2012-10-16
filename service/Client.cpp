@@ -31,6 +31,7 @@
 #include <iostream>
 
 #include "Client.h"
+#include "HashUtil.h"
 #include "TestApp.h"
 
 using namespace google::protobuf::io;
@@ -107,7 +108,8 @@ namespace cbtservice {
                 word[j] = 97 + rand() % kLettersInAlphabet;
             word[num_full_loops_] = 97 + rand() % part_loop_;
 
-            uint32_t filler_number = rand() % kNumFillers;
+            uint32_t filler_number = HashUtil::MurmurHash(word, 42)
+                    % kNumFillers;
 
             word += fillers_[filler_number].substr(0, kKeyLen -
                     num_full_loops_ - 1);
