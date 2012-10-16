@@ -80,9 +80,32 @@ namespace cbt {
         if (!threadsStarted_) {
             startThreads();
         }
-        for (uint64_t i = 0; i < num; ++i) {
-            PartialAgg* agg = paos[i];
-            if (inputNode_->isFull()) {
+
+        uint64_t number_of_PAOs_inserted = 0;
+        uint64_t number_of_PAOs_remaining = num;
+        do {
+            uint64_t number_of_PAOs_to_insert;
+            uint64_t free_space = inputNode_->remSpace();
+            if (number_of_PAOs_remaining > free_space)
+                number_of_PAOs_to_insert = free_space;
+            else
+                number_of_PAOs_to_insert = number_of_PAOs_remaining;
+
+            for (uint64_t i = number_of_PAOs_inserted;
+                    i < number_of_PAOs_inserted + number_of_PAOs_to_insert; ++i) {
+                PartialAgg* agg = paos[i];
+                if (!agg) {
+                    fprintf(stderr, "Err at %ld (ins: %ld, to: %ld)\n", i, number_of_PAOs_inserted, number_of_PAOs_to_insert);
+                    assert(false);
+                }
+                ret &= inputNode_->insert(agg);
+            }
+
+            number_of_PAOs_inserted += number_of_PAOs_to_insert;
+            number_of_PAOs_remaining -= number_of_PAOs_to_insert;
+
+            // if not all PAOs were inserted, root must be full
+            if (number_of_PAOs_inserted < num) {
                 // check if rootNode_ is available
                 inputNode_->checkSerializationIntegrity();
                 pthread_mutex_lock(&rootNodeAvailableMutex_);
@@ -112,8 +135,7 @@ namespace cbt {
                 // schedule the root node for emptying
                 rootNode_->schedule(SORT);
             }
-            ret &= inputNode_->insert(agg);
-        }
+        } while (number_of_PAOs_inserted < num);
         return ret;
     }
 

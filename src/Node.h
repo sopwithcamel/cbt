@@ -114,6 +114,7 @@ namespace cbt {
         bool isRoot() const;
 
         bool isFull() const;
+        uint64_t remSpace() const;
         uint32_t level() const;
         uint32_t id() const;
 

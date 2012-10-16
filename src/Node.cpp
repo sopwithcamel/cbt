@@ -722,6 +722,14 @@ namespace cbt {
         return false;
     }
 
+    uint64_t Node::remSpace() const {
+        uint64_t n = buffer_.numElements();
+        if (n < EMPTY_THRESHOLD)
+            return EMPTY_THRESHOLD - n;
+        else
+            return 0;
+    }
+
     uint32_t Node::level() const {
         return level_;
     }
