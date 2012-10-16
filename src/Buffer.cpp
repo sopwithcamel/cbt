@@ -62,7 +62,9 @@ namespace cbt {
         sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
         data_ = reinterpret_cast<char*>(malloc(buf));
 
-//        fprintf(stderr, "AL: %ld\n", ++allocated_lists);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "AL: %ld\n", ++allocated_lists);
+#endif  // CT_NODE_DEBUG
     }
 
     void Buffer::List::deallocate() {
@@ -78,7 +80,9 @@ namespace cbt {
             free(data_);
             data_ = NULL;
         }
-//        fprintf(stderr, "AL: %ld\n", --allocated_lists);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "AL: %ld\n", --allocated_lists);
+#endif  // CT_NODE_DEBUG
     }
 
     void Buffer::List::setEmpty() {
