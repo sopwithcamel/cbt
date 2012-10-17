@@ -22,6 +22,7 @@
 // Author: Hrishikesh Amur
 
 #include <assert.h>
+#include <omp.h>
 #include <stdio.h>
 #define __STDC_LIMIT_MACROS /* for UINT32_MAX etc. */
 #include <stdint.h>
@@ -30,6 +31,7 @@
 
 #include "Buffer.h"
 #include "CompressTree.h"
+#include "HashUtil.h"
 #include "Slaves.h"
 
 namespace cbt {
@@ -41,18 +43,19 @@ namespace cbt {
     CompressTree::CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
                 const Operations* const ops) :
-        a_(a),
-        b_(b),
-        nodeCtr(1),
-        ops(ops),
-        alg_(SNAPPY),
-        allFlush_(true),
-        lastLeafRead_(0),
-        lastOffset_(0),
-        lastElement_(0),
-        threadsStarted_(false),
-        nodesInMemory_(nodesInMemory),
-        numEvicted_(0) {
+            a_(a),
+            b_(b),
+            nodeCtr(1),
+            ops(ops),
+            alg_(SNAPPY),
+            allFlush_(true),
+            lastLeafRead_(0),
+            lastOffset_(0),
+            lastElement_(0),
+            threadsStarted_(false),
+            nodesInMemory_(nodesInMemory),
+            numEvicted_(0) {
+
         BUFFER_SIZE = buffer_size;
         MAX_ELS_PER_BUFFER = BUFFER_SIZE / pao_size;
         EMPTY_THRESHOLD = MAX_ELS_PER_BUFFER >> 1;
@@ -81,8 +84,8 @@ namespace cbt {
             startThreads();
         }
 
-        uint64_t number_of_PAOs_inserted = 0;
-        uint64_t number_of_PAOs_remaining = num;
+        uint32_t number_of_PAOs_inserted = 0;
+        uint32_t number_of_PAOs_remaining = num;
         do {
             uint64_t number_of_PAOs_to_insert;
             uint64_t free_space = inputNode_->remSpace();
@@ -91,52 +94,84 @@ namespace cbt {
             else
                 number_of_PAOs_to_insert = number_of_PAOs_remaining;
 
-            for (uint64_t i = number_of_PAOs_inserted;
-                    i < number_of_PAOs_inserted + number_of_PAOs_to_insert; ++i) {
-                PartialAgg* agg = paos[i];
-                if (!agg) {
-                    fprintf(stderr, "Err at %ld (ins: %ld, to: %ld)\n", i, number_of_PAOs_inserted, number_of_PAOs_to_insert);
-                    assert(false);
-                }
-                ret &= inputNode_->insert(agg);
+            // set start points for input
+            Buffer::List* l = inputNode_->buffer_.lists_[0];
+            uint32_t buffer_start_index = l->num_;
+            uint32_t PAO_start_index = number_of_PAOs_inserted;
+
+            // compute hashes and sizes in parallel
+            #pragma omp parallel for num_threads(4)
+            for (uint32_t i = 0; i < number_of_PAOs_to_insert; ++i) {
+                PartialAgg* agg = paos[PAO_start_index + i];
+                const char* key = ops->getKey(agg);
+                l->hashes_[buffer_start_index + i] =
+                        HashUtil::MurmurHash(key, strlen(key), 42);
+                l->sizes_[buffer_start_index + i] =
+                        ops->getSerializedSize(agg);
             }
+
+            // compute prefix sums of sizes to determine offset
+            uint32_t* offsets = new uint32_t[number_of_PAOs_to_insert];
+            offsets[0] = l->size_;
+            for (uint32_t i = 1; i < number_of_PAOs_to_insert; ++i)
+                offsets[i] = offsets[i - 1] + l->sizes_[i - 1];
+
+            // serialize in parallel at computed offsets
+            #pragma omp parallel for num_threads(4)
+            for (uint32_t i = 0; i < number_of_PAOs_to_insert; ++i) {
+                PartialAgg* agg = paos[PAO_start_index + i];
+                ops->serialize(agg, l->data_ + offsets[i],
+                        l->sizes_[buffer_start_index + i]);
+            }
+
+            // Update list stats
+            l->size_ = offsets[number_of_PAOs_to_insert - 1] + l->sizes_[
+                    buffer_start_index + number_of_PAOs_to_insert - 1];
+            l->num_ += number_of_PAOs_to_insert;
+
+            delete[] offsets;
 
             number_of_PAOs_inserted += number_of_PAOs_to_insert;
             number_of_PAOs_remaining -= number_of_PAOs_to_insert;
 
             // if not all PAOs were inserted, root must be full
             if (number_of_PAOs_inserted < num) {
-                // check if rootNode_ is available
-                inputNode_->checkSerializationIntegrity();
-                pthread_mutex_lock(&rootNodeAvailableMutex_);
-                while (!rootNode_->buffer_.empty() ||
-                        rootNode_->getQueueStatus() != NONE) {
-#ifdef CT_NODE_DEBUG
-                    if (!rootNode_->buffer_.empty())
-                        fprintf(stderr, "inserter sleeping (buffer not empty)\n");
-                    else
-                        fprintf(stderr, "inserter sleeping (queued somewhere)\n");
-#endif
-                    pthread_cond_wait(&rootNodeAvailableForWriting_,
-                            &rootNodeAvailableMutex_);
-#ifdef CT_NODE_DEBUG
-                    fprintf(stderr, "inserter fingered\n");
-#endif
-                }
-                // switch buffers
-                Buffer temp;
-                temp.lists_ = rootNode_->buffer_.lists_;
-                rootNode_->buffer_.lists_ = inputNode_->buffer_.lists_;
-                inputNode_->buffer_.lists_ = temp.lists_;
-                temp.clear();
-
-                pthread_mutex_unlock(&rootNodeAvailableMutex_);
-
-                // schedule the root node for emptying
-                rootNode_->schedule(SORT);
+                switchRootBuffers();
             }
         } while (number_of_PAOs_inserted < num);
         return ret;
+    }
+
+    bool CompressTree::switchRootBuffers() {
+        // check if rootNode_ is available
+        inputNode_->checkSerializationIntegrity();
+        pthread_mutex_lock(&rootNodeAvailableMutex_);
+        while (!rootNode_->buffer_.empty() ||
+                rootNode_->getQueueStatus() != NONE) {
+#ifdef CT_NODE_DEBUG
+            if (!rootNode_->buffer_.empty())
+                fprintf(stderr, "inserter sleeping (buffer not empty)\n");
+            else
+                fprintf(stderr, "inserter sleeping (queued somewhere)\n");
+#endif
+            pthread_cond_wait(&rootNodeAvailableForWriting_,
+                    &rootNodeAvailableMutex_);
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "inserter fingered\n");
+#endif
+        }
+        // switch buffers
+        Buffer temp;
+        temp.lists_ = rootNode_->buffer_.lists_;
+        rootNode_->buffer_.lists_ = inputNode_->buffer_.lists_;
+        inputNode_->buffer_.lists_ = temp.lists_;
+        temp.clear();
+
+        pthread_mutex_unlock(&rootNodeAvailableMutex_);
+
+        // schedule the root node for emptying
+        rootNode_->schedule(SORT);
+        return true;
     }
 
     bool CompressTree::insert(PartialAgg* agg) {

@@ -83,6 +83,7 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
         friend class Monitor;
 #endif
+        bool switchRootBuffers();
         bool addLeafToEmpty(Node* node);
         bool createNewRoot(Node* otherChild);
         void emptyTree();

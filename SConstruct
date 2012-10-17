@@ -27,10 +27,10 @@ src_files = [Glob('src/*.cpp'), Glob('util/*.cpp'), Glob('common/*.cpp')]
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
 
-env.Append(CCFLAGS = ['-g','-O2','-Wall'],
+env.Append(CCFLAGS = ['-g','-O2','-Wall', '-fopenmp'],
             CPPFLAGS = ['-Isrc/', '-Iutil/', '-Icommon'])
 cbtlib = env.SharedLibrary('cbt', src_files,
-            LIBS = ['-ljemalloc'])
+            LIBS = ['-ljemalloc', '-lgomp'])
 
 test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
 testapp = env.Program('test/testcbt', test_files,
