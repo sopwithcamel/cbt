@@ -63,7 +63,7 @@ namespace cbt {
         friend class Sorter;
         friend class Pager;
         friend class Slave;
-        friend class EmptyQueue;
+        friend class PriorityDAG;
 
         class MergeElement {
           public:

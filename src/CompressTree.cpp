@@ -408,7 +408,7 @@ namespace cbt {
         inputNode_->buffer_.setPageable(false);
 #endif  // ENABLE_PAGING
 
-        uint32_t number_of_root_nodes = 4;
+        uint32_t number_of_root_nodes = 16;
         for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
             Node* n = new Node(this, 0);
             n->buffer_.addList();
@@ -422,8 +422,8 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
-        uint32_t sorterThreadCount = 4;
-        uint32_t compressorThreadCount = 3;
+        uint32_t sorterThreadCount = 12;
+        uint32_t compressorThreadCount = 8;
         uint32_t emptierThreadCount = 1;
 
         // One for the inserter

@@ -60,10 +60,10 @@ namespace cbt {
     typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
             NodeInfoCompare> EnabledPriorityQueue;
 
-    class EmptyQueue {
+    class PriorityDAG {
       public:
-        EmptyQueue() {}
-        ~EmptyQueue() {
+        PriorityDAG() {}
+        ~PriorityDAG() {
             DisabledDAG::iterator it = disabNodes_.begin();
             for ( ; it != disabNodes_.end(); ++it) {
                 delete it->second;
