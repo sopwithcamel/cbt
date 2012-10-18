@@ -973,12 +973,8 @@ namespace cbt {
                     // if it is a leaf, it might be queued for compression
                     if (!isLeaf())
                         setQueueStatus(NONE);
-                    // if root, signal the inserter that the root buffer is
-                    // available for insertion
                     if (rootFlag) {
-                        pthread_mutex_lock(&tree_->rootNodeAvailableMutex_);
-                        pthread_cond_signal(&tree_->rootNodeAvailableForWriting_);
-                        pthread_mutex_unlock(&tree_->rootNodeAvailableMutex_);
+                        tree_->rootNodeAvailable();
                     }
                 }
                 break;

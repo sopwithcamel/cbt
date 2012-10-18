@@ -83,6 +83,10 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
         friend class Monitor;
 #endif
+        Node* getEmptyRootNode();
+        void addEmptyRootNode(Node* n);
+        void addFullRootNode(Node* n);
+        void rootNodeAvailable();
         bool addLeafToEmpty(Node* node);
         bool createNewRoot(Node* otherChild);
         void emptyTree();
@@ -101,6 +105,14 @@ namespace cbt {
         CompressAlgorithm alg_;
         Node* rootNode_;
         Node* inputNode_;
+
+        std::deque<Node*> emptyRootNodes_;
+        pthread_mutex_t emptyRootNodesMutex_;
+        pthread_mutex_t fullRootNodesMutex_;
+        std::deque<Node*> fullRootNodes_;
+
+        pthread_cond_t emptyRootAvailable_;
+
         bool allFlush_;
         EmptyType emptyType_;
         std::deque<Node*> leavesToBeEmptied_;
@@ -122,8 +134,6 @@ namespace cbt {
 
         /* Members for async-emptying */
         Emptier* emptier_;
-        pthread_mutex_t rootNodeAvailableMutex_;
-        pthread_cond_t rootNodeAvailableForWriting_;
 
         /* Members for async-sorting */
         Sorter* sorter_;
