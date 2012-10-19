@@ -751,7 +751,7 @@ namespace cbt {
                     pthread_mutex_unlock(&compMutex_);
                 }
                 break;
-            case SORT:
+            case MERGE:
                 {
                     // Signal that we're done sorting
                     pthread_mutex_lock(&sortMutex_);
@@ -799,12 +799,12 @@ namespace cbt {
                     }
                 }
                 break;
-            case SORT:
+            case MERGE:
                 {
-                    setQueueStatus(SORT);
-                    // add node to sorter
-                    tree_->sorter_->addNode(this);
-                    tree_->sorter_->wakeup();
+                    setQueueStatus(MERGE);
+                    // add node to merger
+                    tree_->merger_->addNode(this);
+                    tree_->merger_->wakeup();
                 }
                 break;
             case EMPTY:
@@ -884,7 +884,7 @@ namespace cbt {
                     pthread_mutex_unlock(&compMutex_);
                 }
                 break;
-            case SORT:
+            case MERGE:
                 {
                     pthread_mutex_lock(&sortMutex_);
                     while (getQueueStatus() == act)
@@ -953,7 +953,7 @@ namespace cbt {
                 }
                 break;
 #endif  // ENABLE_PAGING
-            case SORT:
+            case MERGE:
                 {
                     if (isRoot()) {
                         sortBuffer();

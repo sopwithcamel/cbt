@@ -180,10 +180,10 @@ namespace cbt {
         friend class Node;
     };
 
-    class Sorter : public Slave {
+    class Merger : public Slave {
       public:
-        explicit Sorter(CompressTree* tree);
-        ~Sorter();
+        explicit Merger(CompressTree* tree);
+        ~Merger();
         void work(Node* n);
         void addNode(Node* node);
 

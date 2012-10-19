@@ -221,13 +221,13 @@ namespace cbt {
         /* wait for all nodes to be sorted and emptied
            before proceeding */
         do {
-            sorter_->waitUntilCompletionNoticeReceived();
+            merger_->waitUntilCompletionNoticeReceived();
             emptier_->waitUntilCompletionNoticeReceived();
             compressor_->waitUntilCompletionNoticeReceived();
 #ifdef ENABLE_PAGING
             pager_->waitUntilCompletionNoticeReceived();
 #endif
-        } while (!sorter_->empty() ||
+        } while (!merger_->empty() ||
                 !emptier_->empty() ||
                 !compressor_->empty());
 
@@ -357,7 +357,7 @@ namespace cbt {
                 Buffer temp;
                 temp.lists_ = rootNode_->buffer_.lists_;
                 rootNode_->buffer_.lists_ = n->buffer_.lists_;
-                rootNode_->schedule(SORT);
+                rootNode_->schedule(MERGE);
 
                 n->buffer_.lists_ = temp.lists_;
                 temp.clear();
@@ -381,7 +381,7 @@ namespace cbt {
             Buffer temp;
             temp.lists_ = rootNode_->buffer_.lists_;
             rootNode_->buffer_.lists_ = n->buffer_.lists_;
-            rootNode_->schedule(SORT);
+            rootNode_->schedule(MERGE);
 
             n->buffer_.lists_ = temp.lists_;
             temp.clear();
@@ -422,12 +422,12 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
-        uint32_t sorterThreadCount = 4;
+        uint32_t mergerThreadCount = 4;
         uint32_t compressorThreadCount = 3;
         uint32_t emptierThreadCount = 1;
 
         // One for the inserter
-        uint32_t threadCount = sorterThreadCount + compressorThreadCount +
+        uint32_t threadCount = mergerThreadCount + compressorThreadCount +
                 emptierThreadCount + 1;
 #ifdef ENABLE_PAGING
         uint32_t pagerThreadCount = 1;
@@ -439,8 +439,8 @@ namespace cbt {
 #endif
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
 
-        sorter_ = new Sorter(this);
-        sorter_->startThreads(sorterThreadCount);
+        merger_ = new Merger(this);
+        merger_->startThreads(mergerThreadCount);
 
         compressor_ = new Compressor(this);
         compressor_->startThreads(compressorThreadCount);
@@ -465,7 +465,7 @@ namespace cbt {
     void CompressTree::stopThreads() {
         delete inputNode_;
 
-        sorter_->stopThreads();
+        merger_->stopThreads();
         emptier_->stopThreads();
         compressor_->stopThreads();
 #ifdef ENABLE_PAGING

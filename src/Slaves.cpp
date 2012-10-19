@@ -302,7 +302,7 @@ namespace cbt {
     }
 
     void Emptier::work(Node* n) {
-        n->wait(SORT);
+        n->wait(MERGE);
 #ifdef CT_NODE_DEBUG
         assert(n->getQueueStatus() == EMPTY);
 #endif  // CT_NODE_DEBUG
@@ -367,7 +367,7 @@ namespace cbt {
 
         // schedule to sort
         if (act == DECOMPRESS) {
-            n->schedule(SORT);
+            n->schedule(MERGE);
         } else if (act == DECOMPRESS_ONLY) {
             // no further work if we're only decompressing
             n->setQueueStatus(NONE);
@@ -418,31 +418,31 @@ namespace cbt {
         return "Compressor";
     }
 
-    // Sorter
+    // Merger
 
-    Sorter::Sorter(CompressTree* tree) :
+    Merger::Merger(CompressTree* tree) :
             Slave(tree) {
     }
 
-    Sorter::~Sorter() {
+    Merger::~Merger() {
     }
 
-    void Sorter::work(Node* n) {
+    void Merger::work(Node* n) {
         // block until buffer is decompressed
         n->wait(DECOMPRESS);
         // perform sort or merge
 #ifdef CT_NODE_DEBUG
         Action act = n->getQueueStatus();
-        assert(act == SORT);
+        assert(act == MERGE);
 #endif  // CT_NODE_DEBUG
         n->perform();
         // schedule for emptying
         n->schedule(EMPTY);
         // indicate that we're done sorting
-        n->done(SORT);
+        n->done(MERGE);
     }
 
-    void Sorter::addNode(Node* node) {
+    void Merger::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
             addNodeToQueue(node);
@@ -455,8 +455,8 @@ namespace cbt {
         }
     }
 
-    std::string Sorter::getSlaveName() const {
-        return "Sorter";
+    std::string Merger::getSlaveName() const {
+        return "Merger";
     }
 
 #ifdef ENABLE_PAGING

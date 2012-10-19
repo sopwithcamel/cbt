@@ -51,7 +51,7 @@ namespace cbt {
     class Node;
     class Emptier;
     class Compressor;
-    class Sorter;
+    class Merger;
     class Pager;
 #ifdef ENABLE_COUNTERS
     class Monitor;
@@ -78,7 +78,7 @@ namespace cbt {
         friend class Node;
         friend class Slave;
         friend class Emptier;
-        friend class Sorter;
+        friend class Merger;
         friend class Pager;
 #ifdef ENABLE_COUNTERS
         friend class Monitor;
@@ -136,7 +136,7 @@ namespace cbt {
         Emptier* emptier_;
 
         /* Members for async-sorting */
-        Sorter* sorter_;
+        Merger* merger_;
 
         /* Compression-related */
         Compressor* compressor_;
