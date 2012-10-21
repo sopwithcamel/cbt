@@ -52,10 +52,13 @@ namespace cbt {
     class Emptier;
     class Compressor;
     class Merger;
+    class Sorter;
+#ifdef ENABLE_PAGING
     class Pager;
+#endif  // ENABLE_PAGING
 #ifdef ENABLE_COUNTERS
     class Monitor;
-#endif
+#endif  // ENABLE_COUNTERS
 
     class CompressTree {
       public:
@@ -80,13 +83,14 @@ namespace cbt {
         friend class Emptier;
         friend class Merger;
         friend class Pager;
+        friend class Sorter;
 #ifdef ENABLE_COUNTERS
         friend class Monitor;
 #endif
         Node* getEmptyRootNode();
         void addEmptyRootNode(Node* n);
-        void addFullRootNode(Node* n);
-        void rootNodeAvailable();
+        void submitNodeForEmptying(Node* n);
+        bool rootNodeAvailable();
         bool addLeafToEmpty(Node* node);
         bool createNewRoot(Node* otherChild);
         void emptyTree();
@@ -108,8 +112,6 @@ namespace cbt {
 
         std::deque<Node*> emptyRootNodes_;
         pthread_mutex_t emptyRootNodesMutex_;
-        pthread_mutex_t fullRootNodesMutex_;
-        std::deque<Node*> fullRootNodes_;
 
         pthread_cond_t emptyRootAvailable_;
 
@@ -134,6 +136,9 @@ namespace cbt {
 
         /* Members for async-emptying */
         Emptier* emptier_;
+
+        /* Sorting-related */
+        Sorter* sorter_;
 
         /* Members for async-sorting */
         Merger* merger_;

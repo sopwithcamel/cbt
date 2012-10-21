@@ -138,22 +138,36 @@ namespace cbt {
         friend class Node;
     };
 
+    class Sorter : public Slave {
+      public:
+        explicit Sorter(CompressTree* tree);
+        ~Sorter();
+        void work(Node* n);
+        void addNode(Node* node);
+
+      protected:
+        virtual std::string getSlaveName() const;
+        void addToSorted(Node* n);
+        void submitNextNodeForEmptying();
+
+      private:
+        friend class Node;
+
+        std::deque<Node*> sortedNodes_;
+        pthread_mutex_t sortedNodesMutex_;
+    };
+
     class Emptier : public Slave {
-        struct PrioComp {
-            bool operator()(uint32_t lhs, uint32_t rhs) {
-                return (lhs > rhs);
-            }
-        };
       public:
         explicit Emptier(CompressTree* tree);
         ~Emptier();
         void work(Node* n);
         void addNode(Node* node);
+        // Returns true if there are no queued jobs and all threads are
         // sleeping; false otherwise
         bool empty();
 
       protected:
-        // Returns true if there are no queued jobs and all threads are
         // Returns true if there are queued jobs; false otherwise
         bool more();
         virtual Node* getNextNode(bool fromHead = true);

@@ -46,6 +46,7 @@ namespace cbt {
 #endif  // ENABLE_PAGING
         DECOMPRESS_ONLY,
         DECOMPRESS,
+        SORT,
         MERGE,
         EMPTY,
         COMPRESS,
@@ -61,6 +62,7 @@ namespace cbt {
         friend class Compressor;
         friend class Emptier;
         friend class Merger;
+        friend class Sorter;
         friend class Pager;
         friend class Slave;
         friend class EmptyQueue;

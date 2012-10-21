@@ -655,7 +655,7 @@ namespace cbt {
         // create new node
         Node* newNode = new Node(tree_, level_);
         // move the last floor((b+1)/2) children to new node
-        int newNodeChildIndex = children_.size()-(tree_->b_+1)/2;
+        int newNodeChildIndex = (children_.size() + 1) / 2;
 #ifdef ENABLE_ASSERT_CHECKS
         if (children_[newNodeChildIndex]->separator_ <=
                 children_[newNodeChildIndex-1]->separator_) {
@@ -797,6 +797,14 @@ namespace cbt {
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
                     }
+                }
+                break;
+            case SORT:
+                {
+                    setQueueStatus(SORT);
+                    // add node to merger
+                    tree_->sorter_->addNode(this);
+                    tree_->sorter_->wakeup();
                 }
                 break;
             case MERGE:
@@ -953,14 +961,23 @@ namespace cbt {
                 }
                 break;
 #endif  // ENABLE_PAGING
-            case MERGE:
+            case SORT:
                 {
                     if (isRoot()) {
                         sortBuffer();
                         aggregateSortedBuffer();
                     } else {
+                        assert(false && "Only the root buffer is sorted");
+                    }
+                }
+                break;
+            case MERGE:
+                {
+                    if (!isRoot()) {
                         mergeBuffer();
                         aggregateMergedBuffer();
+                    } else {
+                        assert(false && "root buffer never sorted");
                     }
                 }
                 break;
@@ -974,7 +991,7 @@ namespace cbt {
                     if (!isLeaf())
                         setQueueStatus(NONE);
                     if (rootFlag) {
-                        tree_->rootNodeAvailable();
+                        tree_->sorter_->submitNextNodeForEmptying();
                     }
                 }
                 break;

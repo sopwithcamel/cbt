@@ -268,6 +268,67 @@ namespace cbt {
         // TODO clean up thread state
     }
 
+    // Sorter
+
+    Sorter::Sorter(CompressTree* tree) :
+            Slave(tree) {
+        pthread_mutex_init(&sortedNodesMutex_, NULL);
+    }
+
+    Sorter::~Sorter() {
+        pthread_mutex_destroy(&sortedNodesMutex_);
+    }
+
+    void Sorter::work(Node* n) {
+#ifdef CT_NODE_DEBUG
+        assert(n->getQueueStatus() == SORT);
+#endif  // CT_NODE_DEBUG
+        n->perform();
+
+        addToSorted(n); 
+    }
+
+    void Sorter::addNode(Node* node) {
+        addNodeToQueue(node);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
+                node->id_, node->buffer_.numElements());
+        printElements();
+#endif
+    }
+
+    std::string Sorter::getSlaveName() const {
+        return "Sorter";
+    }
+
+    void Sorter::addToSorted(Node* n) {
+        // pick up the lock so no sorted node can be picked up
+        // for emptying
+        pthread_mutex_lock(&sortedNodesMutex_);
+        if (sortedNodes_.empty()) {
+            // the root node might be out being emptied
+            if (!tree_->rootNodeAvailable()) {
+                sortedNodes_.push_back(n);
+            } else {
+                tree_->submitNodeForEmptying(n);
+            }
+        } else {
+            // there are other full root nodes waiting to be emptied. So just
+            // add this node on to the queue
+            sortedNodes_.push_back(n);
+        }
+        pthread_mutex_unlock(&sortedNodesMutex_);
+    }
+
+    void Sorter::submitNextNodeForEmptying() {
+        pthread_mutex_lock(&sortedNodesMutex_);
+        if (!sortedNodes_.empty()) {
+            Node* n = sortedNodes_.front();
+            sortedNodes_.pop_front();
+            tree_->submitNodeForEmptying(n);
+        }
+        pthread_mutex_unlock(&sortedNodesMutex_);
+    }
 
     // Emptier
 
@@ -306,12 +367,21 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
         assert(n->getQueueStatus() == EMPTY);
 #endif  // CT_NODE_DEBUG
+        bool is_root = n->isRoot();
+
         n->perform();
 
-        // possibly enable parent etc.
-        pthread_spin_lock(&nodesLock_);
-        queue_.post(n);
-        pthread_spin_unlock(&nodesLock_);
+        // No other node is dependent on the root. Performing this check also
+        // avoids the problem, where perform() causes the creation of a new
+        // root which is immediately submitted for emptying. In a regular case,
+        // a parent of n would be in the disabled queue, but in this case it is
+        // not.
+        if (!is_root) {
+            // possibly enable parent etc.
+            pthread_spin_lock(&nodesLock_);
+            queue_.post(n);
+            pthread_spin_unlock(&nodesLock_);
+        }
         
         // handle notifications
         n->done(EMPTY);
@@ -448,7 +518,7 @@ namespace cbt {
             addNodeToQueue(node);
 
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Node %d (size: %u) added to to-sort list: ",
+            fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",
                     node->id_, node->buffer_.numElements());
             printElements();
 #endif  // CT_NODE_DEBUG
