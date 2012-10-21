@@ -398,7 +398,7 @@ namespace cbt {
 
         uint32_t mergerThreadCount = 4;
         uint32_t compressorThreadCount = 3;
-        uint32_t emptierThreadCount = 1;
+        uint32_t emptierThreadCount = 4;
         uint32_t sorterThreadCount = 1;
 
         // One for the inserter

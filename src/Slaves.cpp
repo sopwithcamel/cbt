@@ -68,25 +68,23 @@ namespace cbt {
         Node* ret;
         pthread_spin_lock(&nodesLock_);
         if (nodes_.empty()) {
-            ret = false;
-        } else if (fromHead) {
-            ret = nodes_.front();
-            nodes_.pop_front();
+            ret = NULL;
         } else {
-            ret = nodes_.back();
-            nodes_.pop_back();
+            NodeInfo* ni = nodes_.top();
+            nodes_.pop();
+            ret = ni->node;
+            delete ni;
         }
         pthread_spin_unlock(&nodesLock_);
         return ret;
     }
 
-    bool Slave::addNodeToQueue(Node* node, bool toTail) {
+    bool Slave::addNodeToQueue(Node* n, uint32_t priority) {
         pthread_spin_lock(&nodesLock_);
-        if (toTail) {
-            nodes_.push_back(node);
-        } else {
-            nodes_.push_front(node);
-        }
+        NodeInfo* ni = new NodeInfo();
+        ni->node = n;
+        ni->prio = priority;
+        nodes_.push(ni);
         pthread_spin_unlock(&nodesLock_);
         return true;
     }
@@ -229,11 +227,14 @@ namespace cbt {
             return;
         }
         pthread_spin_lock(&nodesLock_);
-        for (uint32_t i = 0; i < nodes_.size(); ++i) {
-            if (nodes_[i]->isRoot())
-                fprintf(stderr, "%d*, ", nodes_[i]->id());
+        PriorityQueue p = nodes_;
+        while (!p.empty()) {
+            NodeInfo* n = p.top();
+            p.pop();
+            if (n->node->isRoot())
+                fprintf(stderr, "%d*, ", n->node->id());
             else
-                fprintf(stderr, "%d, ", nodes_[i]->id());
+                fprintf(stderr, "%d, ", n->node->id());
         }
         fprintf(stderr, "\n");
         pthread_spin_unlock(&nodesLock_);
@@ -289,7 +290,7 @@ namespace cbt {
     }
 
     void Sorter::addNode(Node* node) {
-        addNodeToQueue(node);
+        addNodeToQueue(node, node->level());
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
                 node->id_, node->buffer_.numElements());
@@ -464,24 +465,20 @@ namespace cbt {
     void Compressor::addNode(Node* node) {
         Action act = node->getQueueStatus();
         if (act == COMPRESS) {
-            addNodeToQueue(node);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "adding node %d to compress: ", node->id_);
-            printElements();
-#endif  // CT_NODE_DEBUG
+            addNodeToQueue(node, /*priority=*/0);
         } else { // DECOMPRESS || DECOMPRESS_ONLY
 #ifdef ENABLE_PAGING
             node->scheduleBufferPageAction(Buffer::PAGE_IN);
 #endif  // ENABLE_PAGING
-
-            addNodeToQueue(node, /* toTail = */false);
+            addNodeToQueue(node, /*priority=*/node->level());
+        }
 
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "adding node %d (size: %u) to decompress: ",
-                    node->id_, node->buffer_.numElements());
-            printElements();
+        fprintf(stderr, "adding node %d (size: %u) to %s: ",
+                node->id_, node->buffer_.numElements(),
+                act == COMPRESS? "compress" : "decompress");
+        printElements();
 #endif  // CT_NODE_DEBUG
-        }
     }
 
     std::string Compressor::getSlaveName() const {
@@ -515,7 +512,7 @@ namespace cbt {
     void Merger::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
-            addNodeToQueue(node);
+            addNodeToQueue(node, node->level());
 
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",

@@ -30,11 +30,14 @@
 
 #include "CompressTree.h"
 #include "Node.h"
-#include "EmptyQueue.h"
+#include "PriorityDAG.h"
 
 namespace cbt {
     class CompressTree;
     class Node;
+
+    typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
+            NodeInfoCompare> PriorityQueue;
 
     class Slave {
       public:
@@ -85,7 +88,7 @@ namespace cbt {
         virtual Node* getNextNode(bool fromHead = true);
 
         // add node to (default: tail of) queue
-        virtual bool addNodeToQueue(Node* node, bool toTail = true);
+        virtual bool addNodeToQueue(Node* node, uint32_t priority);
 
         static void* callHelper(void* context);
         // the pthread execution function. It extracts Nodes added by
@@ -129,7 +132,7 @@ namespace cbt {
         // nodesLock_ protection begin
             // never use the empty() member of the deque directly.
             // instead, always use Slave::empty()
-        std::deque<Node*> nodes_;
+        PriorityQueue nodes_;
         bool inputComplete_;
         bool nodesEmpty_;
         // nodesLock_ protection end
@@ -177,7 +180,7 @@ namespace cbt {
       private:
         friend class Node;
 
-        EmptyQueue queue_;
+        PriorityDAG queue_;
     };
 
     class Compressor : public Slave {
