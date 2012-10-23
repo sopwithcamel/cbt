@@ -354,38 +354,20 @@ namespace cbt {
     void Compressor::work(Node* n) {
         Action act = n->getQueueStatus();
 
-#ifdef ENABLE_PAGING
-        if (act == DECOMPRESS || act == DECOMPRESS_ONLY)
-            n->wait(PAGEIN);
-#endif  // ENABLE_PAGING
-
 #ifdef CT_NODE_DEBUG
-        assert(act == DECOMPRESS || act == DECOMPRESS_ONLY || act == COMPRESS);
+        assert(act == INGRESS || act == INGRESS_ONLY || act == EGRESS);
 #endif  // CT_NODE_DEBUG
 
         n->perform();
 
         // schedule to sort
-        if (act == DECOMPRESS) {
+        if (act == INGRESS) {
             n->schedule(SORT);
-        } else if (act == DECOMPRESS_ONLY) {
+        } else if (act == INGRESS_ONLY) {
             // no further work if we're only decompressing
             n->setQueueStatus(NONE);
-        } else if (act == COMPRESS) {
-#ifdef ENABLE_PAGING
-            // TODO. This is most likely broken now
-            /* Put in a request for paging out. This is necessary to do
-             * right away because of the following case: if a page-in request
-             * arrives when the node is on the compression queue waiting to
-             * be compressed, the page-in request could simply get discarded
-             * since there is no page-out request (yet). This leads to a case
-             * where a decompression later assumes that the page-in has
-             * completed */
-            n->schedule(PAGEOUT);
-#else
-            // if no paging then set as not queued
+        } else if (act == EGRESS) {
             n->setQueueStatus(NONE);
-#endif  // ENABLE_PAGING
         }
 
         n->done(act);
@@ -393,17 +375,13 @@ namespace cbt {
 
     void Compressor::addNode(Node* node) {
         Action act = node->getQueueStatus();
-        if (act == COMPRESS) {
+        if (act == EGRESS) {
             addNodeToQueue(node);
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "adding node %d to compress: ", node->id_);
             printElements();
 #endif  // CT_NODE_DEBUG
-        } else { // DECOMPRESS || DECOMPRESS_ONLY
-#ifdef ENABLE_PAGING
-            node->scheduleBufferPageAction(Buffer::PAGE_IN);
-#endif  // ENABLE_PAGING
-
+        } else { // INGRESS || INGRESS_ONLY
             addNodeToQueue(node, /* toTail = */false);
 
 #ifdef CT_NODE_DEBUG
@@ -429,7 +407,7 @@ namespace cbt {
 
     void Sorter::work(Node* n) {
         // block until buffer is decompressed
-        n->wait(DECOMPRESS);
+        n->wait(INGRESS);
         // perform sort or merge
 #ifdef CT_NODE_DEBUG
         Action act = n->getQueueStatus();
@@ -459,7 +437,7 @@ namespace cbt {
         return "Sorter";
     }
 
-#ifdef ENABLE_PAGING
+#if 0
 
     // Pager
 

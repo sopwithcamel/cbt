@@ -38,20 +38,11 @@ namespace cbt {
 
         public:
 
-#ifdef ENABLE_PAGING
-          enum PageAction {
-              NO_PAGE,
-              PAGE_OUT,
-              PAGE_IN
-          };
-#endif  // ENABLE_PAGING
-
           class List {
             public:
               enum ListState {
-                  DECOMPRESSED,
-                  COMPRESSED,
-                  PAGED_OUT
+                  IN,
+                  OUT
               };
               List();
               ~List();
@@ -74,6 +65,9 @@ namespace cbt {
               size_t c_sizelen_;
               size_t c_datalen_;
           };
+
+          const bool kPagingEnabled;
+
           Buffer();
           Buffer(const Buffer&);
           // clears all buffer state
@@ -95,47 +89,29 @@ namespace cbt {
           bool empty() const;
           uint32_t numElements() const;
           void setParent(Node* n);
-#ifdef ENABLE_PAGING
+
           void setupPaging();
           void cleanupPaging();
-#endif  // ENABLE_PAGING
 
           /* Sorting-related */
           void quicksort(uint32_t left, uint32_t right);
           bool sort();
 
           /* Compression-related */
-          bool compress();
-          bool decompress();
-          void setCompressible(bool flag);
-          void performCompressAction();
-
-#ifdef ENABLE_PAGING
-          /* Paging-related */
-          bool pageOut();
-          bool pageIn();
-          void setPageable(bool flag);
-          /* return value indicates whether the node needs to be added or
-           * if it's already present in the queue */
-          bool checkPageOut();
-          bool checkPageIn();
-          bool performPageAction();
-          PageAction getPageAction();
-#endif  // ENABLE_PAGING
+          bool egress();
+          bool ingress();
+          void setEgressible(bool flag);
 
         private:
           const Node* node_;
           /* buffer fragments */
           std::vector<List*> lists_;
-          bool compressible_;
+          bool egressible_;
           // used during sort
           char** perm_;
 
-#ifdef ENABLE_PAGING
           /* Paging-related */
-          bool pageable_;
           FILE* f_;
-#endif  // ENABLE_PAGING
     };
 }
 #endif  // SRC_BUFFER_H_

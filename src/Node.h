@@ -41,17 +41,11 @@ namespace cbt {
     class Sorter;
 
     enum Action {
-#ifdef ENABLE_PAGING
-        PAGEIN,
-#endif  // ENABLE_PAGING
-        DECOMPRESS_ONLY,
-        DECOMPRESS,
+        INGRESS_ONLY,
+        INGRESS,
         SORT,
         EMPTY,
-        COMPRESS,
-#ifdef ENABLE_PAGING
-        PAGEOUT,
-#endif  // ENABLE_PAGING
+        EGRESS,
         NONE
     };
 
@@ -61,7 +55,6 @@ namespace cbt {
         friend class Compressor;
         friend class Emptier;
         friend class Sorter;
-        friend class Pager;
         friend class Slave;
         friend class EmptyQueue;
 
@@ -120,7 +113,7 @@ namespace cbt {
       private:
         /* Buffer handling functions */
 
-        bool emptyOrCompress();
+        bool emptyOrEgress();
         /* Responsible for handling the spilling of the buffer. */
         bool spillBuffer();
         /* Function: empty the buffer into the buffers in the next level.
@@ -168,8 +161,8 @@ namespace cbt {
 
         // return value indicates whether the node needs to be added or
         // if it's already present in the queue
-        bool checkCompress();
-        bool checkDecompress();
+        bool checkEgress();
+        bool checkIngress();
 
         //
         // management of queues
@@ -188,12 +181,6 @@ namespace cbt {
         void schedule(const Action& act);
         Action getQueueStatus();
         void setQueueStatus(const Action& act);
-
-#ifdef ENABLE_PAGING
-        /* Paging-related functions */
-        void scheduleBufferPageAction(const Buffer::PageAction& act);
-        Buffer::PageAction getPageAction();
-#endif  // ENABLE_PAGING
 
         /* pointer to the tree */
         CompressTree* tree_;
@@ -220,13 +207,8 @@ namespace cbt {
         pthread_cond_t sortCond_;
         pthread_mutex_t sortMutex_;
 
-        pthread_cond_t compCond_;
-        pthread_mutex_t compMutex_;
-
-#ifdef ENABLE_PAGING
-        pthread_cond_t pageCond_;
-        pthread_mutex_t pageMutex_;
-#endif  // ENABLE_PAGING
+        pthread_cond_t xgressCond_;
+        pthread_mutex_t xgressMutex_;
     };
 }
 

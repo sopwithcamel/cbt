@@ -56,16 +56,12 @@ namespace cbt {
         pthread_mutex_init(&sortMutex_, NULL);
         pthread_cond_init(&sortCond_, NULL);
 
-        pthread_mutex_init(&compMutex_, NULL);
-        pthread_cond_init(&compCond_, NULL);
+        pthread_mutex_init(&xgressMutex_, NULL);
+        pthread_cond_init(&xgressCond_, NULL);
 
         pthread_spin_init(&queueStatusLock_, PTHREAD_PROCESS_PRIVATE);
 
-#ifdef ENABLE_PAGING
         buffer_.setupPaging();
-        pthread_mutex_init(&pageMutex_, NULL);
-        pthread_cond_init(&pageCond_, NULL);
-#endif  // ENABLE_PAGING
     }
 
     Node::~Node() {
@@ -75,13 +71,10 @@ namespace cbt {
         pthread_mutex_destroy(&sortMutex_);
         pthread_cond_destroy(&sortCond_);
 
-        pthread_mutex_destroy(&compMutex_);
-        pthread_cond_destroy(&compCond_);
-#ifdef ENABLE_PAGING
-        pthread_mutex_destroy(&pageMutex_);
-        pthread_cond_destroy(&pageCond_);
+        pthread_mutex_destroy(&xgressMutex_);
+        pthread_cond_destroy(&xgressCond_);
+
         buffer_.cleanupPaging();
-#endif  // ENABLE_PAGING
     }
 
     bool Node::insert(PartialAgg* agg) {
@@ -116,22 +109,18 @@ namespace cbt {
         return false;
     }
 
-    bool Node::emptyOrCompress() {
+    bool Node::emptyOrEgress() {
         bool ret = true;
         if (tree_->emptyType_ == ALWAYS || isFull()) {
             ret = spillBuffer();
         } else {
-            schedule(COMPRESS);
+            schedule(EGRESS);
         }
         return ret;
     }
 
     bool Node::spillBuffer() {
-#ifdef ENABLE_PAGING
-        schedule(PAGEIN);
-#else
-        schedule(DECOMPRESS);
-#endif  // ENABLE_PAGING
+        schedule(INGRESS);
         return true;
     }
 
@@ -152,14 +141,14 @@ namespace cbt {
                         %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
-                schedule(COMPRESS);
+                schedule(EGRESS);
             }
             return true;
         }
 
         if (buffer_.empty()) {
             for (curChild = 0; curChild < children_.size(); curChild++) {
-                children_[curChild]->emptyOrCompress();
+                children_[curChild]->emptyOrEgress();
             }
         } else {
             checkSerializationIntegrity();
@@ -167,7 +156,7 @@ namespace cbt {
             // find the first separator strictly greater than the first element
             while (l->hashes_[curElement] >=
                     children_[curChild]->separator_) {
-                children_[curChild]->emptyOrCompress();
+                children_[curChild]->emptyOrEgress();
                 curChild++;
 #ifdef ENABLE_ASSERT_CHECKS
                 if (curChild >= children_.size()) {
@@ -211,7 +200,7 @@ namespace cbt {
                     // skip past all separators not greater than current hash
                     while (l->hashes_[curElement]
                             >= children_[curChild]->separator_) {
-                        children_[curChild]->emptyOrCompress();
+                        children_[curChild]->emptyOrEgress();
                         curChild++;
 #ifdef ENABLE_ASSERT_CHECKS
                         if (curChild >= children_.size()) {
@@ -239,12 +228,12 @@ namespace cbt {
                         children_[curChild]->id_,
                         children_[curChild]->buffer_.lists_.size()-1);
 #endif
-                children_[curChild]->emptyOrCompress();
+                children_[curChild]->emptyOrEgress();
                 curChild++;
             }
-            // empty or compress any remaining children
+            // empty or egress any remaining children
             while (curChild < children_.size()) {
-                children_[curChild]->emptyOrCompress();
+                children_[curChild]->emptyOrEgress();
                 curChild++;
             }
 
@@ -568,10 +557,7 @@ namespace cbt {
 
         // if leaf is also the root, create new root
         if (isRoot()) {
-            buffer_.setCompressible(true);
-#ifdef ENABLE_PAGING
-            buffer_.setPageable(true);
-#endif  // ENABLE_PAGING
+            buffer_.setEgressible(true);
             tree_->createNewRoot(newLeaf);
         } else {
             parent_->addChild(newLeaf);
@@ -582,7 +568,7 @@ namespace cbt {
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
             uint32_t num) {
         // check if the node is still queued up for a previous compression
-        wait(COMPRESS);
+        wait(EGRESS);
 
         // calculate offset
         uint32_t offset = 0;
@@ -594,7 +580,7 @@ namespace cbt {
             num_bytes += parent_list->sizes_[index + i];
         }
 #ifdef ENABLE_ASSERT_CHECKS
-        assert(parent_list->state_ == Buffer::List::DECOMPRESSED);
+        assert(parent_list->state_ == Buffer::List::IN);
         if (num_bytes >= BUFFER_SIZE) {
             fprintf(stderr, "Node: %d, buf: %d\n", id_,
                     num_bytes);
@@ -701,10 +687,7 @@ namespace cbt {
 #endif
 
         if (isRoot()) {
-            buffer_.setCompressible(true);
-#ifdef ENABLE_PAGING
-            buffer_.setPageable(true);
-#endif  // ENABLE_PAGING
+            buffer_.setEgressible(true);
             buffer_.deallocate();
             return tree_->createNewRoot(newNode);
         } else {
@@ -741,14 +724,14 @@ namespace cbt {
 
     void Node::done(const Action& act) {
         switch(act) {
-            case COMPRESS:
-            case DECOMPRESS:
-            case DECOMPRESS_ONLY:
+            case EGRESS:
+            case INGRESS:
+            case INGRESS_ONLY:
                 {
                     // Signal that we're done comp/decomp
-                    pthread_mutex_unlock(&compMutex_);
-                    pthread_cond_signal(&compCond_);
-                    pthread_mutex_unlock(&compMutex_);
+                    pthread_mutex_unlock(&xgressMutex_);
+                    pthread_cond_signal(&xgressCond_);
+                    pthread_mutex_unlock(&xgressMutex_);
                 }
                 break;
             case SORT:
@@ -773,21 +756,21 @@ namespace cbt {
 
     void Node::schedule(const Action& act) {
         switch(act) {
-            case COMPRESS:
-            case DECOMPRESS:
-            case DECOMPRESS_ONLY:
+            case EGRESS:
+            case INGRESS:
+            case INGRESS_ONLY:
                 {
                     bool add;
-                    if (!buffer_.compressible_) {
-                        fprintf(stderr, "Node %d not compressible\n", id_);
+                    if (!buffer_.egressible_) {
+                        fprintf(stderr, "Node %d not xgressible\n", id_);
                         return;
                     }
-                    if (act == COMPRESS) {
+                    if (act == EGRESS) {
                         // check if node has to be added on queue
-                        add = checkCompress();
-                    } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
+                        add = checkEgress();
+                    } else if (act == INGRESS || act == INGRESS_ONLY) {
                         // check if node has to be added on queue
-                        add = checkDecompress();
+                        add = checkIngress();
                     } else {
                         assert(false && "Invalid compress action");
                     }
@@ -823,47 +806,47 @@ namespace cbt {
         }
     }
 
-    bool Node::checkCompress() {
+    bool Node::checkEgress() {
         bool ret;
         Action act = getQueueStatus();
         if (buffer_.empty()) {
             // nothing to be done
             setQueueStatus(NONE);
             ret = false;
-        } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
-            // check if node already queued as DECOMPRESS. This shouldn't
+        } else if (act == INGRESS || act == INGRESS_ONLY) {
+            // check if node already queued as INGRESS. This shouldn't
             // happen.
             fprintf(stderr, "Node %d trying to be compressed while\
                     waiting for decompression\n", id());
             assert(false);
-        } else if (act == COMPRESS) {
+        } else if (act == EGRESS) {
             // previous list queued for compression hasn't been compressed
             // yet. No need to add node again
             ret = false;
         } else {
             // Node not present
-            setQueueStatus(COMPRESS);
+            setQueueStatus(EGRESS);
             ret = true;
         }
         return ret;
     }
 
-    bool Node::checkDecompress() {
+    bool Node::checkIngress() {
         bool ret;
         Action act = getQueueStatus();
         if (buffer_.empty()) {
             setQueueStatus(NONE);
             ret = false;
-        } else if (act == COMPRESS) {
+        } else if (act == EGRESS) {
             // check if compression request is outstanding and cancel this */
             setQueueStatus(act);
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d reset to decompress\n", id());
 #endif
             ret = false;
-        } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
+        } else if (act == INGRESS || act == INGRESS_ONLY) {
             // we're decompressing twice
-            fprintf(stderr, "decompressing node %d twice", id());
+            fprintf(stderr, "ingressing node %d twice", id());
             assert(false);
         } else { // NONE
             setQueueStatus(act);
@@ -874,14 +857,14 @@ namespace cbt {
 
     void Node::wait(const Action& act) {
         switch (act) {
-            case COMPRESS:
-            case DECOMPRESS:
-            case DECOMPRESS_ONLY:
+            case EGRESS:
+            case INGRESS:
+            case INGRESS_ONLY:
                 {
-                    pthread_mutex_lock(&compMutex_);
+                    pthread_mutex_lock(&xgressMutex_);
                     while (getQueueStatus() == act)
-                        pthread_cond_wait(&compCond_, &compMutex_);
-                    pthread_mutex_unlock(&compMutex_);
+                        pthread_cond_wait(&xgressCond_, &xgressMutex_);
+                    pthread_mutex_unlock(&xgressMutex_);
                 }
                 break;
             case SORT:
@@ -900,17 +883,6 @@ namespace cbt {
                     pthread_mutex_unlock(&emptyMutex_);
                 }
                 break;
-#ifdef ENABLE_PAGING
-            case PAGEIN:
-            case PAGEOUT:
-                {
-                    pthread_mutex_lock(&pageMutex_);
-                    while (getQueueStatus() == act)
-                        pthread_cond_wait(&pageCond_, &pageMutex_);
-                    pthread_mutex_unlock(&pageMutex_);
-                }
-                break;
-#endif  // ENABLE_PAGING
             case NONE:
                 {
                     assert(false && "Can't wait for NONE");
@@ -922,37 +894,17 @@ namespace cbt {
     void Node::perform() {
         Action act = getQueueStatus();
         switch (act) {
-            case COMPRESS:
-            case DECOMPRESS:
-            case DECOMPRESS_ONLY:
+            case EGRESS:
+            case INGRESS:
+            case INGRESS_ONLY:
                 {
-                    if (act == COMPRESS) {
-                        buffer_.compress();
-                    } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
-#ifdef ENABLE_PAGING
-                        wait(PAGE_IN);
-#endif  // ENABLE_PAGING
-                        buffer_.decompress();
+                    if (act == EGRESS) {
+                        buffer_.egress();
+                    } else if (act == INGRESS || act == INGRESS_ONLY) {
+                        buffer_.ingress();
                     }
                 }
                 break;
-#ifdef ENABLE_PAGING
-            case PAGEIN:
-            case PAGEOUT:
-                {
-                    ret = buffer_.performPageAction();
-#ifdef CT_NODE_DEBUG
-                    if (ret) {
-                        Buffer::PageAction act = getPageAction();
-                        if (act == Buffer::PAGE_OUT)
-                            fprintf(stderr, "pager: paged out node: %d\n", id_);
-                        else if (act == Buffer::PAGE_IN)
-                            fprintf(stderr, "pager: paged in node: %d\n", id_);
-#endif  // CT_NODE_DEBUG
-                    }
-                }
-                break;
-#endif  // ENABLE_PAGING
             case SORT:
                 {
                     if (isRoot()) {
@@ -989,33 +941,6 @@ namespace cbt {
                 break;
         }
     }
-
-#ifdef ENABLE_PAGING
-    void Node::scheduleBufferPageAction(const Buffer::PageAction& act)  {
-        if (!buffer_.pageable_) {
-            fprintf(stderr, "Node %d not pageable\n", id_);
-            return;
-        }
-        bool add;
-        if (act == Buffer::PAGE_OUT)
-            add = buffer_.checkPageOut();
-        else if (act == Buffer::PAGE_IN)
-            add = buffer_.checkPageIn();
-        else
-            assert(false && "Invalid page action");
-        if (add) {
-            tree_->pager_->addNode(this);
-            tree_->pager_->wakeup();
-        }
-    }
-
-    bool Node::performPageAction() {
-    }
-
-    Buffer::PageAction Node::getPageAction() {
-        return buffer_.getPageAction();
-    }
-#endif  // ENABLE_PAGING
 
     bool Node::checkSerializationIntegrity(int listn  /* =-1*/) {
 #if 0

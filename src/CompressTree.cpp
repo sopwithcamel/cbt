@@ -150,8 +150,8 @@ namespace cbt {
             Node* curLeaf = allLeaves_[0];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(DECOMPRESS_ONLY);
-            curLeaf->wait(DECOMPRESS_ONLY);
+            curLeaf->schedule(INGRESS_ONLY);
+            curLeaf->wait(INGRESS_ONLY);
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -170,7 +170,7 @@ namespace cbt {
         lastElement_++;
 
         if (lastElement_ >= curLeaf->buffer_.numElements()) {
-            curLeaf->schedule(COMPRESS);
+            curLeaf->schedule(EGRESS);
             if (++lastLeafRead_ == allLeaves_.size()) {
                 /* Wait for all outstanding compression work to finish */
                 compressor_->waitUntilCompletionNoticeReceived();
@@ -184,8 +184,8 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(DECOMPRESS_ONLY);
-            n->wait(DECOMPRESS_ONLY);
+            n->schedule(INGRESS_ONLY);
+            n->wait(INGRESS_ONLY);
             lastOffset_ = 0;
             lastElement_ = 0;
         }
@@ -255,9 +255,6 @@ namespace cbt {
             sorter_->waitUntilCompletionNoticeReceived();
             emptier_->waitUntilCompletionNoticeReceived();
             compressor_->waitUntilCompletionNoticeReceived();
-#ifdef ENABLE_PAGING
-            pager_->waitUntilCompletionNoticeReceived();
-#endif
         } while (!sorter_->empty() ||
                 !emptier_->empty() ||
                 !compressor_->empty());
@@ -319,15 +316,15 @@ namespace cbt {
             if (newLeaf && newLeaf->isFull()) {
                 l2 = newLeaf->splitLeaf();
             }
-            node->schedule(COMPRESS);
+            node->schedule(EGRESS);
             if (newLeaf) {
-                newLeaf->schedule(COMPRESS);
+                newLeaf->schedule(EGRESS);
             }
             if (l1) {
-                l1->schedule(COMPRESS);
+                l1->schedule(EGRESS);
             }
             if (l2) {
-                l2->schedule(COMPRESS);
+                l2->schedule(EGRESS);
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
@@ -343,16 +340,12 @@ namespace cbt {
         rootNode_ = new Node(this, 0);
         rootNode_->buffer_.addList();
         rootNode_->separator_ = UINT32_MAX;
-        rootNode_->buffer_.setCompressible(false);
+        rootNode_->buffer_.setEgressible(false);
 
         inputNode_ = new Node(this, 0);
         inputNode_->buffer_.addList();
         inputNode_->separator_ = UINT32_MAX;
-        inputNode_->buffer_.setCompressible(false);
-#ifdef ENABLE_PAGING
-        rootNode_->buffer_.setPageable(false);
-        inputNode_->buffer_.setPageable(false);
-#endif
+        inputNode_->buffer_.setEgressible(false);
 
         emptyType_ = IF_FULL;
 
@@ -363,10 +356,6 @@ namespace cbt {
         // One for the inserter
         uint32_t threadCount = sorterThreadCount + compressorThreadCount +
                 emptierThreadCount + 1;
-#ifdef ENABLE_PAGING
-        uint32_t pagerThreadCount = 1;
-        threadCount += pagerThreadCount;
-#endif
 #ifdef ENABLE_COUNTERS
         uint32_t monitorThreadCount = 1;
         threadCount += monitorThreadCount;
@@ -381,11 +370,6 @@ namespace cbt {
 
         emptier_ = new Emptier(this);
         emptier_->startThreads(emptierThreadCount);
-
-#ifdef ENABLE_PAGING
-        pager_ = new Pager(this);
-        pager_->startThreads(pagerThreadCount);
-#endif
 
 #ifdef ENABLE_COUNTERS
         monitor_ = new Monitor(this);
@@ -402,9 +386,6 @@ namespace cbt {
         sorter_->stopThreads();
         emptier_->stopThreads();
         compressor_->stopThreads();
-#ifdef ENABLE_PAGING
-        pager_->stopThreads();
-#endif
 #ifdef ENABLE_COUNTERS
         monitor_->stopThreads();
 #endif
@@ -415,7 +396,7 @@ namespace cbt {
         Node* newRoot = new Node(this, rootNode_->level() + 1);
         newRoot->buffer_.addList();
         newRoot->separator_ = UINT32_MAX;
-        newRoot->buffer_.setCompressible(false);
+        newRoot->buffer_.setEgressible(false);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d is new root; children are %d and %d\n",
                 newRoot->id_, rootNode_->id_, otherChild->id_);

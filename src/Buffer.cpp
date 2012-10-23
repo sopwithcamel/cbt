@@ -41,7 +41,7 @@ namespace cbt {
             data_(NULL),
             num_(0),
             size_(0),
-            state_(DECOMPRESSED),
+            state_(IN),
             c_hashlen_(0),
             c_sizelen_(0),
             c_datalen_(0) {
@@ -88,14 +88,12 @@ namespace cbt {
     void Buffer::List::setEmpty() {
         num_ = 0;
         size_ = 0;
-        state_ = DECOMPRESSED;
+        state_ = IN;
     }
 
     Buffer::Buffer() :
-            compressible_(true) {
-#ifdef ENABLE_PAGING
-        pageable_ = true;
-#endif  // ENABLE_PAGING
+            kPagingEnabled(false),
+            egressible_(true) {
     }
 
     Buffer::~Buffer() {
@@ -298,274 +296,179 @@ namespace cbt {
 
     // Compression-related    
 
-    bool Buffer::compress() {
+    bool Buffer::egress() {
         if (!empty()) {
             // allocate memory for one list
-            Buffer compressed;
+            Buffer egressed;
 
             for (uint32_t i = 0; i < lists_.size(); ++i) {
-                Buffer::List* l = lists_[i];
-                if (l->state_ == Buffer::List::COMPRESSED)
+                Buffer::List* in_list = lists_[i];
+                if (in_list->state_ == Buffer::List::OUT)
                     continue;
-#ifdef ENABLE_PAGING
-                if (l->state_ == Buffer::List::PAGED_OUT)
-                    continue;
-#endif  // ENABLE_PAGING
-                compressed.addList();
-                // latest added list
-                Buffer::List* cl =
-                        compressed.lists_[compressed.lists_.size()-1];
-                snappy::RawCompress((const char*)l->hashes_,
-                        l->num_ * sizeof(uint32_t),
-                        reinterpret_cast<char*>(cl->hashes_),
-                        &l->c_hashlen_);
-                snappy::RawCompress((const char*)l->sizes_,
-                        l->num_ * sizeof(uint32_t),
-                        reinterpret_cast<char*>(cl->sizes_),
-                        &l->c_sizelen_);
-/*
-                compsort::compress(l->hashes_, l->num_,
-                        cl->hashes_, (uint32_t&)l->c_hashlen_);
-                rle::encode(l->sizes_, l->num_, cl->sizes_,
-                        (uint32_t&)l->c_sizelen_);
-*/
-                snappy::RawCompress(l->data_, l->size_,
-                        cl->data_,
-                        &l->c_datalen_);
-                l->deallocate();
-                l->hashes_ = cl->hashes_;
-                l->sizes_ = cl->sizes_;
-                l->data_ = cl->data_;
-                l->state_ = Buffer::List::COMPRESSED;
+
+                // Perform compression or paging out
+                if (!kPagingEnabled) {
+                    List* out_list = egressed.addList();
+                    snappy::RawCompress((const char*)in_list->hashes_,
+                            in_list->num_ * sizeof(uint32_t),
+                            reinterpret_cast<char*>(out_list->hashes_),
+                            &in_list->c_hashlen_);
+                    snappy::RawCompress((const char*)in_list->sizes_,
+                            in_list->num_ * sizeof(uint32_t),
+                            reinterpret_cast<char*>(out_list->sizes_),
+                            &in_list->c_sizelen_);
+                    /*
+                       compsort::compress(l->hashes_, l->num_,
+                       cl->hashes_, (uint32_t&)l->c_hashlen_);
+                       rle::encode(l->sizes_, l->num_, cl->sizes_,
+                       (uint32_t&)l->c_sizelen_);
+                     */
+                    snappy::RawCompress(in_list->data_, in_list->size_,
+                            out_list->data_,
+                            &in_list->c_datalen_);
+                    in_list->deallocate();
+                    in_list->hashes_ = out_list->hashes_;
+                    in_list->sizes_ = out_list->sizes_;
+                    in_list->data_ = out_list->data_;
+                    in_list->state_ = List::OUT;
 #ifdef CT_NODE_DEBUG
-                fprintf(stderr, "compressed list %d in node %d\n",
-                        i, node_->id_);
+                    fprintf(stderr, "compessed list %d in node %d\n",
+                            i, node_->id_);
 #endif  // CT_NODE_DEBUG
-            }
-            // clear compressed list so lists won't be deallocated on return
-            compressed.clear();
-        }
-        return true;
-    }
-
-    bool Buffer::decompress() {
-        if (!empty()) {
-            // allocate memory for decompressed buffers
-            Buffer decompressed;
-
-            for (uint32_t i = 0; i < lists_.size(); ++i) {
-                Buffer::List* cl = lists_[i];
-                if (cl->state_ == Buffer::List::DECOMPRESSED)
-                    continue;
-                decompressed.addList();
-                // latest added list
-                Buffer::List* l =
-                        decompressed.lists_[decompressed.lists_.size()-1];
-                snappy::RawUncompress((const char*)cl->hashes_,
-                        cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
-                snappy::RawUncompress((const char*)cl->sizes_,
-                        cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
-/*
-                uint32_t siz;
-                compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
-                        l->hashes_, siz);
-                rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
-                        l->sizes_, siz);
-*/
-                snappy::RawUncompress(cl->data_, cl->c_datalen_,
-                        l->data_);
-                cl->deallocate();
-                cl->hashes_ = l->hashes_;
-                cl->sizes_ = l->sizes_;
-                cl->data_ = l->data_;
-                cl->state_ = List::DECOMPRESSED;
-            }
-            // clear decompressed so lists won't be deallocated on return
-            decompressed.clear();
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "decompressed node %d; n: %u\n",
-                    node_->id_, numElements());
-#endif  // CT_NODE_DEBUG
-        }
-        return true;
-    }
-
-    void Buffer::setCompressible(bool flag) {
-        // TODO Synchrnonization required
-        compressible_ = flag;
-    }
-
-#ifdef ENABLE_PAGING
-    bool Buffer::pageOut() {
-        if (!empty()) {
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "paged out node %d; lists: ", node_->id_);
-#endif  // CT_NODE_DEBUG
-            for (uint32_t i = 0; i < lists_.size(); ++i) {
-                Buffer::List* l = lists_[i];
-                /* List may be already paged out or yet to be compressed */
-                if (l->state_ != List::COMPRESSED)
-                    continue;
-                size_t ret1, ret2, ret3;
-                ret1 = fwrite(l->hashes_, 1, l->c_hashlen_, f_);
-                ret2 = fwrite(l->sizes_, 1, l->c_sizelen_, f_);
-                ret3 = fwrite(l->data_, 1, l->c_datalen_, f_);
-                if (ret1 != l->c_hashlen_ || ret2 != l->c_sizelen_ ||
-                        ret3 != l->c_datalen_) {
-                    assert(false);
+                } else { // Paging
+                    size_t ret1, ret2, ret3;
+                    ret1 = fwrite(in_list->hashes_, 1,
+                            in_list->num_ * sizeof(uint32_t), f_);
+                    ret2 = fwrite(in_list->sizes_, 1,
+                            in_list->num_ * sizeof(uint32_t), f_);
+                    ret3 = fwrite(in_list->data_, 1,
+                            in_list->size_, f_);
+                    if (ret1 != in_list->num_ * sizeof(uint32_t) ||
+                            ret2 != in_list->num_ * sizeof(uint32_t) ||
+                            ret3 != in_list->size_) {
+                        assert(false);
 #ifdef ENABLE_ASSERT_CHECKS
-                    fprintf(stderr, "Node %d page-out fail! Error: %s\n",
-                            node_->id_, strerror(errno));
-                    fprintf(stderr,
-                            "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
-                            l->c_hashlen_, ret1, l->c_sizelen_, ret2,
-                            l->c_datalen_, ret3);
+                        fprintf(stderr, "Node %d page-out fail! Error: %s\n",
+                                node_->id_, strerror(errno));
+                        fprintf(stderr,
+                                "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
+                                in_list->num_ * sizeof(uint32_t), ret1,
+                                in_list->num_ * sizeof(uint32_t), ret2,
+                                in_list->size_, ret3);
 #endif  // ENABLE_ASSERT_CHECKS
+                    }
+                    in_list->deallocate();
+                    in_list->state_ = List::OUT;
+#ifdef CT_NODE_DEBUG
+                    fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
+#endif  // CT_NODE_DEBUG
                 }
-                l->deallocate();
-                l->state_ = List::PAGED_OUT;
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
-#endif  // CT_NODE_DEBUG
             }
+            // clear egressed list so lists won't be deallocated on return
+            egressed.clear();
         }
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "\n");
-#endif  // CT_NODE_DEBUG
         return true;
     }
 
-    bool Buffer::pageIn() {
-        // set file pointer to beginning of file
-        rewind(f_);
+    bool Buffer::ingress() {
+        if (!empty()) {
+            // allocate memory for ingressed buffers
+            Buffer ingressed;
 
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "paged in node %d; lists: ", node_->id_);
-#endif  // CT_NODE_DEBUG
+            // set file pointer to beginning of file
+            if (kPagingEnabled)
+                rewind(f_);
 
-        Buffer paged_in;
-        for (uint32_t i = 0; i < lists_.size(); ++i) {
-            List* l = lists_[i];
-            // check if the list is already paged in
-            if (l->state_ != List::PAGED_OUT)
-                continue;
-            List* pgin_list = paged_in.addList();
-            size_t ret1, ret2, ret3;
-            ret1 = fread(pgin_list->hashes_, 1, l->c_hashlen_, f_);
-            ret2 = fread(pgin_list->sizes_, 1, l->c_sizelen_, f_);
-            ret3 = fread(pgin_list->data_, 1, l->c_datalen_, f_);
-            if (ret1 != l->c_hashlen_ || ret2 != l->c_sizelen_ ||
-                    ret3 != l->c_datalen_) {
+            for (uint32_t i = 0; i < lists_.size(); ++i) {
+                Buffer::List* out_list = lists_[i];
+                if (out_list->state_ == Buffer::List::IN)
+                    continue;
+                // latest added list
+                Buffer::List* in_list = ingressed.addList();
+
+                if (!kPagingEnabled) {
+                    snappy::RawUncompress((const char*)out_list->hashes_,
+                            out_list->c_hashlen_,
+                            reinterpret_cast<char*>(in_list->hashes_));
+                    snappy::RawUncompress((const char*)out_list->sizes_,
+                            out_list->c_sizelen_,
+                            reinterpret_cast<char*>(in_list->sizes_));
+                    /*
+                       uint32_t siz;
+                       compsort::ingress(cl->hashes_, (uint32_t)cl->c_hashlen_,
+                       l->hashes_, siz);
+                       rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
+                       l->sizes_, siz);
+                     */
+                    snappy::RawUncompress(out_list->data_,
+                            out_list->c_datalen_,
+                            in_list->data_);
+                } else { // Paging
+                    size_t ret1, ret2, ret3;
+                    ret1 = fread(in_list->hashes_, 1,
+                            out_list->num_ * sizeof(uint32_t), f_);
+                    ret2 = fread(in_list->sizes_, 1,
+                            out_list->num_ * sizeof(uint32_t), f_);
+                    ret3 = fread(in_list->data_, 1,
+                            out_list->size_, f_);
+                    if (ret1 != out_list->num_ * sizeof(uint32_t) ||
+                            ret2 != out_list->num_ * sizeof(uint32_t) ||
+                            ret3 != out_list->size_) {
 #ifdef ENABLE_ASSERT_CHECKS
-                fprintf(stderr, "Node %d page-in fail! Error: %s\n",
-                        node_->id_, strerror(errno));
-                fprintf(stderr,
-                        "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
-                        l->c_hashlen_, ret1, l->c_sizelen_, ret2,
-                        l->c_datalen_, ret3);
+                        fprintf(stderr, "Node %d page-in fail! Error: %s\n",
+                                node_->id_, strerror(errno));
+                        fprintf(stderr,
+                                "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\n\
+                                DL:%ld;RDL:%ld\n",
+                                out_list->num_ * sizeof(uint32_t), ret1,
+                                out_list->num_ * sizeof(uint32_t), ret2,
+                                out_list->size_, ret3);
 #endif  // ENABLE_ASSERT_CHECKS
-                assert(false);
-            }
+                        assert(false);
+                    }
+                }
+
+                out_list->deallocate();
+                out_list->hashes_ = in_list->hashes_;
+                out_list->sizes_ = in_list->sizes_;
+                out_list->data_ = in_list->data_;
+                out_list->state_ = List::OUT;
+                // clear ingressed so lists won't be deallocated on return
+                ingressed.clear();
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
+                fprintf(stderr, "ingressed node %d; n: %u\n", node_->id_,
+                        numElements());
 #endif  // CT_NODE_DEBUG
-            l->hashes_ = pgin_list->hashes_;
-            l->sizes_ = pgin_list->sizes_;
-            l->data_ = pgin_list->data_;
-            l->state_ = List::COMPRESSED;
+            } 
+
+            // set file pointer to beginning of file
+            if (kPagingEnabled)
+                rewind(f_);
         }
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "\n");
-#endif  // CT_NODE_DEBUG
-        // clear paged_in to prevent deallocation on return
-        paged_in.clear();
-
-        // set file pointer to beginning of file again
-        rewind(f_);
-
         return true;
     }
 
-    void Buffer::setPageable(bool flag) {
-        pthread_mutex_lock(&pageMutex_);
-        pageable_ = flag;
-        pthread_mutex_unlock(&pageMutex_);
+    void Buffer::setEgressible(bool flag) {
+        // TODO Synchrnonization required
+        egressible_ = flag;
     }
 
     void Buffer::setupPaging() {
-        stringstream fileName;
-        fileName << "/localfs/hamur/minni_data/";
-        fileName << node_->id_;
-        fileName << ".buf";
-        f_ = fopen(fileName.str().c_str(), "w+");
-        if (f_ == NULL) {
-            fprintf(stderr, "Error opening file: %s\n", strerror(errno));
-            assert(false);
+        if (kPagingEnabled) {
+            std::stringstream fileName;
+            fileName << "/localfs/hamur/minni_data/";
+            fileName << node_->id_;
+            fileName << ".buf";
+            f_ = fopen(fileName.str().c_str(), "w+");
+            if (f_ == NULL) {
+                fprintf(stderr, "Error opening file: %s\n", strerror(errno));
+                assert(false);
+            }
         }
     }
 
     void Buffer::cleanupPaging() {
-        fclose(f_);
+        if (kPagingEnabled)
+            fclose(f_);
     }
-
-    bool Buffer::checkPageOut() {
-        pthread_mutex_lock(&pageMutex_);
-        // check if node already in list
-        if (queuedForPaging_) {
-                /* Shouldn't happen (we're paging out twice) */
-            assert(false);
-            return false;
-        } else {
-            queuedForPaging_ = true;
-            pageAct_ = PAGE_OUT;
-            pthread_mutex_unlock(&pageMutex_);
-            return true;
-        }
-    }
-
-    bool Buffer::checkPageIn() {
-        pthread_mutex_lock(&pageMutex_);
-        // check if node already in list
-        if (queuedForPaging_) {
-            // check if page-out request is outstanding and cancel if so
-            if (pageAct_ == PAGE_OUT) {
-                // reset action request; node need not be added again
-                pageAct_ = PAGE_IN;
-                pthread_mutex_unlock(&pageMutex_);
-                return false;
-            } else {  // we're paging-in twice
-                assert(false);
-            }
-        } else {
-            queuedForPaging_ = true;
-            pageAct_ = PAGE_IN;
-            pthread_mutex_unlock(&pageMutex_);
-            return true;
-        }
-    }
-
-    bool Buffer::performPageAction() {
-        bool ret = true;
-        pthread_mutex_lock(&pageMutex_);
-        if (pageAct_ == PAGE_OUT) {
-            if (lists_[lists_.size()-1]->state_ != List::COMPRESSED)
-                ret = false;
-            else
-                pageOut();
-        } else if (pageAct_ == PAGE_IN) {
-            pageIn();
-        }
-        if (ret) {
-            pthread_cond_signal(&pageCond_);
-            queuedForPaging_ = false;
-            pageAct_ = NO_PAGE;
-        }
-        pthread_mutex_unlock(&pageMutex_);
-        return ret;
-    }
-
-    Buffer::PageAction Buffer::getPageAction() {
-        return pageAct_;
-    }
-#endif  // ENABLE_PAGING
 }

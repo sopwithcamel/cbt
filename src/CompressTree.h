@@ -131,11 +131,6 @@ namespace cbt {
         /* Compression-related */
         Compressor* compressor_;
 
-#ifdef ENABLE_PAGING
-        /* Paging */
-        Pager* pager_;
-#endif
-
 #ifdef ENABLE_COUNTERS
         /* Monitor */
         Monitor* monitor_;

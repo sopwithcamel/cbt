@@ -84,7 +84,7 @@ namespace cbt {
             uint32_t i, s = n->children_.size();
             std::set<uint32_t>* d = new std::set<uint32_t>();
             for (i = 0; i < s; ++i) {
-                if (n->children_[i]->getQueueStatus() < COMPRESS) {
+                if (n->children_[i]->getQueueStatus() < EGRESS) {
                     canEmpty = false;
                     d->insert(n->children_[i]->id());
                 }
