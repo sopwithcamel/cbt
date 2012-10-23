@@ -41,24 +41,25 @@ namespace cbt {
     CompressTree::CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
                 const Operations* const ops) :
-        a_(a),
-        b_(b),
-        nodeCtr(1),
-        ops(ops),
-        alg_(SNAPPY),
-        allFlush_(true),
-        lastLeafRead_(0),
-        lastOffset_(0),
-        lastElement_(0),
-        threadsStarted_(false),
-        nodesInMemory_(nodesInMemory),
-        numEvicted_(0) {
+            a_(a),
+            b_(b),
+            nodeCtr(1),
+            ops(ops),
+            alg_(SNAPPY),
+            allFlush_(true),
+            lastLeafRead_(0),
+            lastOffset_(0),
+            lastElement_(0),
+            threadsStarted_(false),
+            nodesInMemory_(nodesInMemory),
+            numEvicted_(0) {
         BUFFER_SIZE = buffer_size;
         MAX_ELS_PER_BUFFER = BUFFER_SIZE / pao_size;
         EMPTY_THRESHOLD = MAX_ELS_PER_BUFFER >> 1;
 
-        pthread_mutex_init(&rootNodeAvailableMutex_, NULL);
-        pthread_cond_init(&rootNodeAvailableForWriting_, NULL);
+        pthread_cond_init(&emptyRootAvailable_, NULL);
+
+        pthread_mutex_init(&emptyRootNodesMutex_, NULL);
 
 #ifdef ENABLE_COUNTERS
         monitor_ = NULL;
@@ -66,8 +67,8 @@ namespace cbt {
     }
 
     CompressTree::~CompressTree() {
-        pthread_cond_destroy(&rootNodeAvailableForWriting_);
-        pthread_mutex_destroy(&rootNodeAvailableMutex_);
+        pthread_cond_destroy(&emptyRootAvailable_);
+        pthread_mutex_destroy(&emptyRootNodesMutex_);
         pthread_barrier_destroy(&threadsBarrier_);
     }
 
@@ -83,34 +84,16 @@ namespace cbt {
         for (uint64_t i = 0; i < num; ++i) {
             PartialAgg* agg = paos[i];
             if (inputNode_->isFull()) {
-                // check if rootNode_ is available
-                inputNode_->checkSerializationIntegrity();
-                pthread_mutex_lock(&rootNodeAvailableMutex_);
-                while (!rootNode_->buffer_.empty() ||
-                        rootNode_->getQueueStatus() != NONE) {
-#ifdef CT_NODE_DEBUG
-                    if (!rootNode_->buffer_.empty())
-                        fprintf(stderr, "inserter sleeping (buffer not empty)\n");
-                    else
-                        fprintf(stderr, "inserter sleeping (queued somewhere)\n");
-#endif
-                    pthread_cond_wait(&rootNodeAvailableForWriting_,
-                            &rootNodeAvailableMutex_);
-#ifdef CT_NODE_DEBUG
-                    fprintf(stderr, "inserter fingered\n");
-#endif
-                }
-                // switch buffers
-                Buffer temp;
-                temp.lists_ = rootNode_->buffer_.lists_;
-                rootNode_->buffer_.lists_ = inputNode_->buffer_.lists_;
-                inputNode_->buffer_.lists_ = temp.lists_;
-                temp.clear();
+                // add inputNode_ to be sorted
+                inputNode_->schedule(SORT);
 
-                pthread_mutex_unlock(&rootNodeAvailableMutex_);
-
-                // schedule the root node for emptying
-                rootNode_->schedule(SORT);
+                // get an empty root. This function can block until there are
+                // empty roots available
+                inputNode_ = getEmptyRootNode();
+#ifdef CT_NODE_DEBUG
+                fprintf(stderr, "Now inputting into node %d\n",
+                        inputNode_->id());
+#endif  // CT_NODE_DEBUG
             }
             ret &= inputNode_->insert(agg);
         }
@@ -229,33 +212,17 @@ namespace cbt {
         Node* curNode;
         std::deque<Node*> visitQueue;
         fprintf(stderr, "Starting to flush\n");
-        // check if rootNode_ is available
-        pthread_mutex_lock(&rootNodeAvailableMutex_);
-        while (!rootNode_->buffer_.empty() ||
-                rootNode_->getQueueStatus() != NONE) {
-            pthread_cond_wait(&rootNodeAvailableForWriting_,
-                    &rootNodeAvailableMutex_);
-        }
-        pthread_mutex_unlock(&rootNodeAvailableMutex_);
-        // root node is now empty
+
         emptyType_ = ALWAYS;
-
-        // switch buffers
-        Buffer temp;
-        temp.lists_ = rootNode_->buffer_.lists_;
-        rootNode_->buffer_.lists_ = inputNode_->buffer_.lists_;
-        inputNode_->buffer_.lists_ = temp.lists_;
-        temp.clear();
-
-        rootNode_->schedule(SORT);
+        inputNode_->schedule(SORT);
 
         /* wait for all nodes to be sorted and emptied
            before proceeding */
         do {
-            sorter_->waitUntilCompletionNoticeReceived();
+            merger_->waitUntilCompletionNoticeReceived();
             emptier_->waitUntilCompletionNoticeReceived();
             compressor_->waitUntilCompletionNoticeReceived();
-        } while (!sorter_->empty() ||
+        } while (!merger_->empty() ||
                 !emptier_->empty() ||
                 !compressor_->empty());
 
@@ -335,6 +302,65 @@ namespace cbt {
         }
     }
 
+    Node* CompressTree::getEmptyRootNode() {
+        pthread_mutex_lock(&emptyRootNodesMutex_);
+        while (emptyRootNodes_.empty()) {
+#ifdef CT_NODE_DEBUG
+            if (!rootNode_->buffer_.empty())
+                fprintf(stderr, "inserter sleeping (buffer not empty)\n");
+            else
+                fprintf(stderr, "inserter sleeping (queued somewhere %d)\n",
+                        emptyRootNodes_.size());
+#endif
+
+            pthread_cond_wait(&emptyRootAvailable_, &emptyRootNodesMutex_);
+
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "inserter fingered\n");
+#endif
+        }
+        Node* e = emptyRootNodes_.front();
+        emptyRootNodes_.pop_front();
+        pthread_mutex_unlock(&emptyRootNodesMutex_);
+        return e;
+    }
+
+    void CompressTree::addEmptyRootNode(Node* n) {
+        bool no_empty_nodes = false;
+        pthread_mutex_lock(&emptyRootNodesMutex_);
+        // check if there are no empty nodes right now
+        if (emptyRootNodes_.empty())
+            no_empty_nodes = true;
+        emptyRootNodes_.push_back(n);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Added empty root (now has: %d)\n",
+                emptyRootNodes_.size());
+#endif
+        // if this is the first empty node, then signal
+//        if (no_empty_nodes)
+        pthread_cond_signal(&emptyRootAvailable_);
+        pthread_mutex_unlock(&emptyRootNodesMutex_);
+    }
+
+    bool CompressTree::rootNodeAvailable() {
+        if (!rootNode_->buffer_.empty() ||
+                rootNode_->getQueueStatus() != NONE)
+            return false;
+        return true;
+    }
+
+    void CompressTree::submitNodeForEmptying(Node* n) {
+        // perform the switch, schedule root, add node to empty list
+        Buffer temp;
+        temp.lists_ = rootNode_->buffer_.lists_;
+        rootNode_->buffer_.lists_ = n->buffer_.lists_;
+        rootNode_->schedule(EMPTY);
+
+        n->buffer_.lists_ = temp.lists_;
+        temp.clear();
+        addEmptyRootNode(n);
+    }
+
     void CompressTree::startThreads() {
         // create root node; initially a leaf
         rootNode_ = new Node(this, 0);
@@ -347,15 +373,25 @@ namespace cbt {
         inputNode_->separator_ = UINT32_MAX;
         inputNode_->buffer_.setEgressible(false);
 
+        uint32_t number_of_root_nodes = 4;
+        for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
+            Node* n = new Node(this, 0);
+            n->buffer_.addList();
+            n->separator_ = UINT32_MAX;
+            n->buffer_.setEgressible(false);
+            emptyRootNodes_.push_back(n);
+        }
+
         emptyType_ = IF_FULL;
 
-        uint32_t sorterThreadCount = 4;
-        uint32_t compressorThreadCount = 1;
-        uint32_t emptierThreadCount = 1;
+        uint32_t mergerThreadCount = 4;
+        uint32_t compressorThreadCount = 3;
+        uint32_t emptierThreadCount = 4;
+        uint32_t sorterThreadCount = 1;
 
         // One for the inserter
-        uint32_t threadCount = sorterThreadCount + compressorThreadCount +
-                emptierThreadCount + 1;
+        uint32_t threadCount = mergerThreadCount + compressorThreadCount +
+                emptierThreadCount + sorterThreadCount + 1;
 #ifdef ENABLE_COUNTERS
         uint32_t monitorThreadCount = 1;
         threadCount += monitorThreadCount;
@@ -364,6 +400,9 @@ namespace cbt {
 
         sorter_ = new Sorter(this);
         sorter_->startThreads(sorterThreadCount);
+
+        merger_ = new Merger(this);
+        merger_->startThreads(mergerThreadCount);
 
         compressor_ = new Compressor(this);
         compressor_->startThreads(compressorThreadCount);
@@ -383,6 +422,7 @@ namespace cbt {
     void CompressTree::stopThreads() {
         delete inputNode_;
 
+        merger_->stopThreads();
         sorter_->stopThreads();
         emptier_->stopThreads();
         compressor_->stopThreads();

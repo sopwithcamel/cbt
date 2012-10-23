@@ -38,12 +38,13 @@ namespace cbt {
     class CompressTree;
     class Emptier;
     class Compressor;
-    class Sorter;
+    class Merger;
 
     enum Action {
         INGRESS_ONLY,
         INGRESS,
         SORT,
+        MERGE,
         EMPTY,
         EGRESS,
         NONE
@@ -54,9 +55,10 @@ namespace cbt {
         friend class Buffer;
         friend class Compressor;
         friend class Emptier;
+        friend class Merger;
         friend class Sorter;
         friend class Slave;
-        friend class EmptyQueue;
+        friend class PriorityDAG;
 
         class MergeElement {
           public:
@@ -168,7 +170,7 @@ namespace cbt {
         // management of queues
         //
         // Actually perform action. This assumes that it is ok to perform the
-        // action and does not check. For example, perform(SORT) will directly
+        // action and does not check. For example, perform(MERGE) will directly
         // sort/merge the buffer. The caller has to ensure that the buffer is
         // already decompressed.
         void perform();

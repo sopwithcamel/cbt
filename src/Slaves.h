@@ -30,11 +30,14 @@
 
 #include "CompressTree.h"
 #include "Node.h"
-#include "EmptyQueue.h"
+#include "PriorityDAG.h"
 
 namespace cbt {
     class CompressTree;
     class Node;
+
+    typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
+            NodeInfoCompare> PriorityQueue;
 
     class Slave {
       public:
@@ -85,7 +88,7 @@ namespace cbt {
         virtual Node* getNextNode(bool fromHead = true);
 
         // add node to (default: tail of) queue
-        virtual bool addNodeToQueue(Node* node, bool toTail = true);
+        virtual bool addNodeToQueue(Node* node, uint32_t priority);
 
         static void* callHelper(void* context);
         // the pthread execution function. It extracts Nodes added by
@@ -129,7 +132,7 @@ namespace cbt {
         // nodesLock_ protection begin
             // never use the empty() member of the deque directly.
             // instead, always use Slave::empty()
-        std::deque<Node*> nodes_;
+        PriorityQueue nodes_;
         bool inputComplete_;
         bool nodesEmpty_;
         // nodesLock_ protection end
@@ -138,22 +141,36 @@ namespace cbt {
         friend class Node;
     };
 
+    class Sorter : public Slave {
+      public:
+        explicit Sorter(CompressTree* tree);
+        ~Sorter();
+        void work(Node* n);
+        void addNode(Node* node);
+
+      protected:
+        virtual std::string getSlaveName() const;
+        void addToSorted(Node* n);
+        void submitNextNodeForEmptying();
+
+      private:
+        friend class Node;
+
+        std::deque<Node*> sortedNodes_;
+        pthread_mutex_t sortedNodesMutex_;
+    };
+
     class Emptier : public Slave {
-        struct PrioComp {
-            bool operator()(uint32_t lhs, uint32_t rhs) {
-                return (lhs > rhs);
-            }
-        };
       public:
         explicit Emptier(CompressTree* tree);
         ~Emptier();
         void work(Node* n);
         void addNode(Node* node);
+        // Returns true if there are no queued jobs and all threads are
         // sleeping; false otherwise
         bool empty();
 
       protected:
-        // Returns true if there are no queued jobs and all threads are
         // Returns true if there are queued jobs; false otherwise
         bool more();
         virtual Node* getNextNode(bool fromHead = true);
@@ -163,7 +180,7 @@ namespace cbt {
       private:
         friend class Node;
 
-        EmptyQueue queue_;
+        PriorityDAG queue_;
     };
 
     class Compressor : public Slave {
@@ -180,10 +197,10 @@ namespace cbt {
         friend class Node;
     };
 
-    class Sorter : public Slave {
+    class Merger : public Slave {
       public:
-        explicit Sorter(CompressTree* tree);
-        ~Sorter();
+        explicit Merger(CompressTree* tree);
+        ~Merger();
         void work(Node* n);
         void addNode(Node* node);
 

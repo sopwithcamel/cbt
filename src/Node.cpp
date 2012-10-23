@@ -641,7 +641,7 @@ namespace cbt {
         // create new node
         Node* newNode = new Node(tree_, level_);
         // move the last floor((b+1)/2) children to new node
-        int newNodeChildIndex = children_.size()-(tree_->b_+1)/2;
+        int newNodeChildIndex = (children_.size() + 1) / 2;
 #ifdef ENABLE_ASSERT_CHECKS
         if (children_[newNodeChildIndex]->separator_ <=
                 children_[newNodeChildIndex-1]->separator_) {
@@ -734,7 +734,7 @@ namespace cbt {
                     pthread_mutex_unlock(&xgressMutex_);
                 }
                 break;
-            case SORT:
+            case MERGE:
                 {
                     // Signal that we're done sorting
                     pthread_mutex_lock(&sortMutex_);
@@ -785,9 +785,17 @@ namespace cbt {
             case SORT:
                 {
                     setQueueStatus(SORT);
-                    // add node to sorter
+                    // add node to merger
                     tree_->sorter_->addNode(this);
                     tree_->sorter_->wakeup();
+                }
+                break;
+            case MERGE:
+                {
+                    setQueueStatus(MERGE);
+                    // add node to merger
+                    tree_->merger_->addNode(this);
+                    tree_->merger_->wakeup();
                 }
                 break;
             case EMPTY:
@@ -867,7 +875,7 @@ namespace cbt {
                     pthread_mutex_unlock(&xgressMutex_);
                 }
                 break;
-            case SORT:
+            case MERGE:
                 {
                     pthread_mutex_lock(&sortMutex_);
                     while (getQueueStatus() == act)
@@ -911,8 +919,17 @@ namespace cbt {
                         sortBuffer();
                         aggregateSortedBuffer();
                     } else {
+                        assert(false && "Only the root buffer is sorted");
+                    }
+                }
+                break;
+            case MERGE:
+                {
+                    if (!isRoot()) {
                         mergeBuffer();
                         aggregateMergedBuffer();
+                    } else {
+                        assert(false && "root buffer never sorted");
                     }
                 }
                 break;
@@ -925,12 +942,8 @@ namespace cbt {
                     // if it is a leaf, it might be queued for compression
                     if (!isLeaf())
                         setQueueStatus(NONE);
-                    // if root, signal the inserter that the root buffer is
-                    // available for insertion
                     if (rootFlag) {
-                        pthread_mutex_lock(&tree_->rootNodeAvailableMutex_);
-                        pthread_cond_signal(&tree_->rootNodeAvailableForWriting_);
-                        pthread_mutex_unlock(&tree_->rootNodeAvailableMutex_);
+                        tree_->sorter_->submitNextNodeForEmptying();
                     }
                 }
                 break;

@@ -68,25 +68,23 @@ namespace cbt {
         Node* ret;
         pthread_spin_lock(&nodesLock_);
         if (nodes_.empty()) {
-            ret = false;
-        } else if (fromHead) {
-            ret = nodes_.front();
-            nodes_.pop_front();
+            ret = NULL;
         } else {
-            ret = nodes_.back();
-            nodes_.pop_back();
+            NodeInfo* ni = nodes_.top();
+            nodes_.pop();
+            ret = ni->node;
+            delete ni;
         }
         pthread_spin_unlock(&nodesLock_);
         return ret;
     }
 
-    bool Slave::addNodeToQueue(Node* node, bool toTail) {
+    bool Slave::addNodeToQueue(Node* n, uint32_t priority) {
         pthread_spin_lock(&nodesLock_);
-        if (toTail) {
-            nodes_.push_back(node);
-        } else {
-            nodes_.push_front(node);
-        }
+        NodeInfo* ni = new NodeInfo();
+        ni->node = n;
+        ni->prio = priority;
+        nodes_.push(ni);
         pthread_spin_unlock(&nodesLock_);
         return true;
     }
@@ -229,11 +227,14 @@ namespace cbt {
             return;
         }
         pthread_spin_lock(&nodesLock_);
-        for (uint32_t i = 0; i < nodes_.size(); ++i) {
-            if (nodes_[i]->isRoot())
-                fprintf(stderr, "%d*, ", nodes_[i]->id());
+        PriorityQueue p = nodes_;
+        while (!p.empty()) {
+            NodeInfo* n = p.top();
+            p.pop();
+            if (n->node->isRoot())
+                fprintf(stderr, "%d*, ", n->node->id());
             else
-                fprintf(stderr, "%d, ", nodes_[i]->id());
+                fprintf(stderr, "%d, ", n->node->id());
         }
         fprintf(stderr, "\n");
         pthread_spin_unlock(&nodesLock_);
@@ -268,6 +269,67 @@ namespace cbt {
         // TODO clean up thread state
     }
 
+    // Sorter
+
+    Sorter::Sorter(CompressTree* tree) :
+            Slave(tree) {
+        pthread_mutex_init(&sortedNodesMutex_, NULL);
+    }
+
+    Sorter::~Sorter() {
+        pthread_mutex_destroy(&sortedNodesMutex_);
+    }
+
+    void Sorter::work(Node* n) {
+#ifdef CT_NODE_DEBUG
+        assert(n->getQueueStatus() == SORT);
+#endif  // CT_NODE_DEBUG
+        n->perform();
+
+        addToSorted(n); 
+    }
+
+    void Sorter::addNode(Node* node) {
+        addNodeToQueue(node, node->level());
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
+                node->id_, node->buffer_.numElements());
+        printElements();
+#endif
+    }
+
+    std::string Sorter::getSlaveName() const {
+        return "Sorter";
+    }
+
+    void Sorter::addToSorted(Node* n) {
+        // pick up the lock so no sorted node can be picked up
+        // for emptying
+        pthread_mutex_lock(&sortedNodesMutex_);
+        if (sortedNodes_.empty()) {
+            // the root node might be out being emptied
+            if (!tree_->rootNodeAvailable()) {
+                sortedNodes_.push_back(n);
+            } else {
+                tree_->submitNodeForEmptying(n);
+            }
+        } else {
+            // there are other full root nodes waiting to be emptied. So just
+            // add this node on to the queue
+            sortedNodes_.push_back(n);
+        }
+        pthread_mutex_unlock(&sortedNodesMutex_);
+    }
+
+    void Sorter::submitNextNodeForEmptying() {
+        pthread_mutex_lock(&sortedNodesMutex_);
+        if (!sortedNodes_.empty()) {
+            Node* n = sortedNodes_.front();
+            sortedNodes_.pop_front();
+            tree_->submitNodeForEmptying(n);
+        }
+        pthread_mutex_unlock(&sortedNodesMutex_);
+    }
 
     // Emptier
 
@@ -302,16 +364,25 @@ namespace cbt {
     }
 
     void Emptier::work(Node* n) {
-        n->wait(SORT);
+        n->wait(MERGE);
 #ifdef CT_NODE_DEBUG
         assert(n->getQueueStatus() == EMPTY);
 #endif  // CT_NODE_DEBUG
+        bool is_root = n->isRoot();
+
         n->perform();
 
-        // possibly enable parent etc.
-        pthread_spin_lock(&nodesLock_);
-        queue_.post(n);
-        pthread_spin_unlock(&nodesLock_);
+        // No other node is dependent on the root. Performing this check also
+        // avoids the problem, where perform() causes the creation of a new
+        // root which is immediately submitted for emptying. In a regular case,
+        // a parent of n would be in the disabled queue, but in this case it is
+        // not.
+        if (!is_root) {
+            // possibly enable parent etc.
+            pthread_spin_lock(&nodesLock_);
+            queue_.post(n);
+            pthread_spin_unlock(&nodesLock_);
+        }
         
         // handle notifications
         n->done(EMPTY);
@@ -376,65 +447,62 @@ namespace cbt {
     void Compressor::addNode(Node* node) {
         Action act = node->getQueueStatus();
         if (act == EGRESS) {
-            addNodeToQueue(node);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "adding node %d to compress: ", node->id_);
-            printElements();
-#endif  // CT_NODE_DEBUG
+            addNodeToQueue(node, /*priority=*/0);
         } else { // INGRESS || INGRESS_ONLY
-            addNodeToQueue(node, /* toTail = */false);
+            addNodeToQueue(node, /*priority=*/node->level());
+        }
 
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "adding node %d (size: %u) to decompress: ",
-                    node->id_, node->buffer_.numElements());
-            printElements();
+        fprintf(stderr, "adding node %d (size: %u) to %s: ",
+                node->id_, node->buffer_.numElements(),
+                act == COMPRESS? "compress" : "decompress");
+        printElements();
 #endif  // CT_NODE_DEBUG
-        }
     }
 
     std::string Compressor::getSlaveName() const {
         return "Compressor";
     }
 
-    // Sorter
+    // Merger
 
-    Sorter::Sorter(CompressTree* tree) :
+    Merger::Merger(CompressTree* tree) :
             Slave(tree) {
     }
 
-    Sorter::~Sorter() {
+    Merger::~Merger() {
     }
 
-    void Sorter::work(Node* n) {
+    void Merger::work(Node* n) {
         // block until buffer is decompressed
         n->wait(INGRESS);
         // perform sort or merge
 #ifdef CT_NODE_DEBUG
         Action act = n->getQueueStatus();
-        assert(act == SORT);
+        assert(act == MERGE);
 #endif  // CT_NODE_DEBUG
         n->perform();
         // schedule for emptying
         n->schedule(EMPTY);
         // indicate that we're done sorting
-        n->done(SORT);
+        n->done(MERGE);
     }
 
-    void Sorter::addNode(Node* node) {
+    void Merger::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
-            addNodeToQueue(node);
+            addNodeToQueue(node, node->level());
 
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Node %d (size: %u) added to to-sort list: ",
+            fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",
                     node->id_, node->buffer_.numElements());
             printElements();
 #endif  // CT_NODE_DEBUG
         }
     }
 
-    std::string Sorter::getSlaveName() const {
-        return "Sorter";
+    std::string Merger::getSlaveName() const {
+        return "Merger";
     }
 
 #if 0
