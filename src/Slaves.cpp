@@ -433,7 +433,7 @@ namespace cbt {
 
         // schedule to sort
         if (act == INGRESS) {
-            n->schedule(SORT);
+            n->schedule(MERGE);
         } else if (act == INGRESS_ONLY) {
             // no further work if we're only decompressing
             n->setQueueStatus(NONE);
@@ -455,7 +455,7 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
                 node->id_, node->buffer_.numElements(),
-                act == COMPRESS? "compress" : "decompress");
+                act == EGRESS? "compress" : "decompress");
         printElements();
 #endif  // CT_NODE_DEBUG
     }
