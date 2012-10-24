@@ -131,14 +131,14 @@ namespace cbt {
 
             // page in and decompress first leaf
             Node* curLeaf = allLeaves_[0];
-            while (curLeaf->buffer_.numElements() == 0)
+            while (curLeaf->input_buffer_->numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
             curLeaf->schedule(INGRESS_ONLY);
             curLeaf->wait(INGRESS_ONLY);
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
-        Buffer::List* l = curLeaf->buffer_.lists_[0];
+        Buffer::List* l = curLeaf->input_buffer_->lists_[0];
         hash = reinterpret_cast<void*>(&l->hashes_[lastElement_]);
         ops->createPAO(NULL, &agg);
 //        if (lastLeafRead_ == 0)
@@ -152,7 +152,7 @@ namespace cbt {
         lastOffset_ += l->sizes_[lastElement_];
         lastElement_++;
 
-        if (lastElement_ >= curLeaf->buffer_.numElements()) {
+        if (lastElement_ >= curLeaf->input_buffer_->numElements()) {
             curLeaf->schedule(EGRESS);
             if (++lastLeafRead_ == allLeaves_.size()) {
                 /* Wait for all outstanding compression work to finish */
@@ -165,7 +165,7 @@ namespace cbt {
                 return false;
             }
             Node *n = allLeaves_[lastLeafRead_];
-            while (curLeaf->buffer_.numElements() == 0)
+            while (curLeaf->input_buffer_->numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
             n->schedule(INGRESS_ONLY);
             n->wait(INGRESS_ONLY);
@@ -258,7 +258,7 @@ namespace cbt {
         fprintf(stderr, "Tree has depth: %d\n", depth);
         uint64_t numit = 0;
         for (uint64_t i = 0; i < allLeaves_.size(); ++i)
-            numit += allLeaves_[i]->buffer_.numElements();
+            numit += allLeaves_[i]->input_buffer_->numElements();
         fprintf(stderr, "Tree has %ld elements\n", numit);
         return true;
     }
@@ -306,7 +306,7 @@ namespace cbt {
         pthread_mutex_lock(&emptyRootNodesMutex_);
         while (emptyRootNodes_.empty()) {
 #ifdef CT_NODE_DEBUG
-            if (!rootNode_->buffer_.empty())
+            if (!rootNode_->input_buffer_->empty())
                 fprintf(stderr, "inserter sleeping (buffer not empty)\n");
             else
                 fprintf(stderr, "inserter sleeping (queued somewhere %d)\n",
@@ -343,7 +343,7 @@ namespace cbt {
     }
 
     bool CompressTree::rootNodeAvailable() {
-        if (!rootNode_->buffer_.empty() ||
+        if (!rootNode_->input_buffer_->empty() ||
                 rootNode_->getQueueStatus() != NONE)
             return false;
         return true;
@@ -352,11 +352,11 @@ namespace cbt {
     void CompressTree::submitNodeForEmptying(Node* n) {
         // perform the switch, schedule root, add node to empty list
         Buffer temp;
-        temp.lists_ = rootNode_->buffer_.lists_;
-        rootNode_->buffer_.lists_ = n->buffer_.lists_;
+        temp.lists_ = rootNode_->input_buffer_->lists_;
+        rootNode_->input_buffer_->lists_ = n->input_buffer_->lists_;
         rootNode_->schedule(EMPTY);
 
-        n->buffer_.lists_ = temp.lists_;
+        n->input_buffer_->lists_ = temp.lists_;
         temp.clear();
         addEmptyRootNode(n);
     }
@@ -364,21 +364,21 @@ namespace cbt {
     void CompressTree::startThreads() {
         // create root node; initially a leaf
         rootNode_ = new Node(this, 0);
-        rootNode_->buffer_.addList();
+        rootNode_->input_buffer_->addList();
         rootNode_->separator_ = UINT32_MAX;
-        rootNode_->buffer_.setEgressible(false);
+        rootNode_->input_buffer_->setEgressible(false);
 
         inputNode_ = new Node(this, 0);
-        inputNode_->buffer_.addList();
+        inputNode_->input_buffer_->addList();
         inputNode_->separator_ = UINT32_MAX;
-        inputNode_->buffer_.setEgressible(false);
+        inputNode_->input_buffer_->setEgressible(false);
 
         uint32_t number_of_root_nodes = 4;
         for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
             Node* n = new Node(this, 0);
-            n->buffer_.addList();
+            n->input_buffer_->addList();
             n->separator_ = UINT32_MAX;
-            n->buffer_.setEgressible(false);
+            n->input_buffer_->setEgressible(false);
             emptyRootNodes_.push_back(n);
         }
 
@@ -434,9 +434,9 @@ namespace cbt {
 
     bool CompressTree::createNewRoot(Node* otherChild) {
         Node* newRoot = new Node(this, rootNode_->level() + 1);
-        newRoot->buffer_.addList();
+        newRoot->input_buffer_->addList();
         newRoot->separator_ = UINT32_MAX;
-        newRoot->buffer_.setEgressible(false);
+        newRoot->input_buffer_->setEgressible(false);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d is new root; children are %d and %d\n",
                 newRoot->id_, rootNode_->id_, otherChild->id_);

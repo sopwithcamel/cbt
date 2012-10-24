@@ -187,7 +187,7 @@ namespace cbt {
         /* pointer to the tree */
         CompressTree* tree_;
         /* Buffer */
-        Buffer buffer_;
+        Buffer* input_buffer_;
         pthread_mutex_t stateMutex_;
         uint32_t id_;
         /* level in the tree; 0 at leaves and increases upwards */
