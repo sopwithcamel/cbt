@@ -125,22 +125,25 @@ namespace cbt {
             // If parent is present, it must be in the disabled queue.
             // remove n from its parent's dependency list
             if (n->parent_ && n->parent_->getQueueStatus() == EMPTY) {
-                std::set<uint32_t>* ch = disabNodes_[n->parent_];
-                std::set<uint32_t>::iterator it = ch->find(n->id());
-                if (it != ch->end()) { // found
-                    ch->erase(it);
-                }
-                // if dependency list of parent is empty move parent to enabled
-                // queue
-                if (ch->empty()) {
-                    NodeInfo* np = new NodeInfo();
-                    np->node = n->parent_;
-                    np->prio = n->parent_->level();
-                    enabNodes_.push(np);
+                DisabledDAG::iterator parent_it = disabNodes_.find(n->parent_);
+                if (parent_it != disabNodes_.end()) {
+                    std::set<uint32_t>* ch = parent_it->second;
+                    std::set<uint32_t>::iterator it = ch->find(n->id());
+                    if (it != ch->end()) { // found
+                        ch->erase(it);
+                    }
+                    // if dependency list of parent is empty move parent to enabled
+                    // queue
+                    if (ch->empty()) {
+                        NodeInfo* np = new NodeInfo();
+                        np->node = n->parent_;
+                        np->prio = n->parent_->level();
+                        enabNodes_.push(np);
 
-                    delete ch;
-                    DisabledDAG::iterator t = disabNodes_.find(n->parent_);
-                    disabNodes_.erase(t); 
+                        delete ch;
+                        DisabledDAG::iterator t = disabNodes_.find(n->parent_);
+                        disabNodes_.erase(t); 
+                    }
                 }
             }
             
