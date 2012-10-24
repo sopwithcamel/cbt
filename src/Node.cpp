@@ -42,8 +42,7 @@ namespace cbt {
             tree_(tree),
             input_buffer_(NULL),
             level_(level),
-            parent_(NULL),
-            queueStatus_(NONE) {
+            parent_(NULL) {
         id_ = tree_->nodeCtr++;
 
         input_buffer_ = new Buffer();
@@ -62,8 +61,6 @@ namespace cbt {
 
         pthread_mutex_init(&xgressMutex_, NULL);
         pthread_cond_init(&xgressCond_, NULL);
-
-        pthread_spin_init(&queueStatusLock_, PTHREAD_PROCESS_PRIVATE);
     }
 
     Node::~Node() {
@@ -716,19 +713,6 @@ namespace cbt {
         return id_;
     }
 
-    Action Node::getQueueStatus() {
-        pthread_spin_lock(&queueStatusLock_);
-        Action ret = queueStatus_;
-        pthread_spin_unlock(&queueStatusLock_);
-        return ret;
-    }
-
-    void Node::setQueueStatus(const Action& act) {
-        pthread_spin_lock(&queueStatusLock_);
-        queueStatus_ = act;
-        pthread_spin_unlock(&queueStatusLock_);
-    }
-
     void Node::done(const Action& act) {
         switch(act) {
             case EGRESS:
@@ -783,7 +767,7 @@ namespace cbt {
                     }
 
                     if (add) {
-                        setQueueStatus(act);
+                        input_buffer_->setQueueStatus(act);
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
                     }
@@ -791,7 +775,7 @@ namespace cbt {
                 break;
             case SORT:
                 {
-                    setQueueStatus(SORT);
+                    input_buffer_->setQueueStatus(SORT);
                     // add node to merger
                     tree_->sorter_->addNode(this);
                     tree_->sorter_->wakeup();
@@ -799,7 +783,7 @@ namespace cbt {
                 break;
             case MERGE:
                 {
-                    setQueueStatus(MERGE);
+                    input_buffer_->setQueueStatus(MERGE);
                     // add node to merger
                     tree_->merger_->addNode(this);
                     tree_->merger_->wakeup();
@@ -807,7 +791,7 @@ namespace cbt {
                 break;
             case EMPTY:
                 {
-                    setQueueStatus(act);
+                    input_buffer_->setQueueStatus(act);
                     // add node to empty
                     tree_->emptier_->addNode(this);
                     tree_->emptier_->wakeup();
@@ -823,10 +807,10 @@ namespace cbt {
 
     bool Node::checkEgress() {
         bool ret;
-        Action act = getQueueStatus();
+        Action act = input_buffer_->getQueueStatus();
         if (input_buffer_->empty()) {
             // nothing to be done
-            setQueueStatus(NONE);
+            input_buffer_->setQueueStatus(NONE);
             ret = false;
         } else if (act == INGRESS || act == INGRESS_ONLY) {
             // check if node already queued as INGRESS. This shouldn't
@@ -840,7 +824,7 @@ namespace cbt {
             ret = false;
         } else {
             // Node not present
-            setQueueStatus(EGRESS);
+            input_buffer_->setQueueStatus(EGRESS);
             ret = true;
         }
         return ret;
@@ -848,13 +832,13 @@ namespace cbt {
 
     bool Node::checkIngress() {
         bool ret;
-        Action act = getQueueStatus();
+        Action act = input_buffer_->getQueueStatus();
         if (input_buffer_->empty()) {
-            setQueueStatus(NONE);
+            input_buffer_->setQueueStatus(NONE);
             ret = false;
         } else if (act == EGRESS) {
             // check if compression request is outstanding and cancel this */
-            setQueueStatus(act);
+            input_buffer_->setQueueStatus(act);
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d reset to decompress\n", id());
 #endif
@@ -864,7 +848,7 @@ namespace cbt {
             fprintf(stderr, "ingressing node %d twice", id());
             assert(false);
         } else { // NONE
-            setQueueStatus(act);
+            input_buffer_->setQueueStatus(act);
             ret = true;
         }
         return ret;
@@ -877,7 +861,7 @@ namespace cbt {
             case INGRESS_ONLY:
                 {
                     pthread_mutex_lock(&xgressMutex_);
-                    while (getQueueStatus() == act)
+                    while (input_buffer_->getQueueStatus() == act)
                         pthread_cond_wait(&xgressCond_, &xgressMutex_);
                     pthread_mutex_unlock(&xgressMutex_);
                 }
@@ -885,7 +869,7 @@ namespace cbt {
             case MERGE:
                 {
                     pthread_mutex_lock(&sortMutex_);
-                    while (getQueueStatus() == act)
+                    while (input_buffer_->getQueueStatus() == act)
                         pthread_cond_wait(&sortCond_, &sortMutex_);
                     pthread_mutex_unlock(&sortMutex_);
                 }
@@ -893,7 +877,7 @@ namespace cbt {
             case EMPTY:
                 {
                     pthread_mutex_lock(&emptyMutex_);
-                    while (getQueueStatus() == act)
+                    while (input_buffer_->getQueueStatus() == act)
                         pthread_cond_wait(&emptyCond_, &emptyMutex_);
                     pthread_mutex_unlock(&emptyMutex_);
                 }
@@ -907,7 +891,7 @@ namespace cbt {
     }
 
     void Node::perform() {
-        Action act = getQueueStatus();
+        Action act = input_buffer_->getQueueStatus();
         switch (act) {
             case EGRESS:
             case INGRESS:
@@ -948,7 +932,7 @@ namespace cbt {
                         tree_->handleFullLeaves();
                     // if it is a leaf, it might be queued for compression
                     if (!isLeaf())
-                        setQueueStatus(NONE);
+                        input_buffer_->setQueueStatus(NONE);
                     if (rootFlag) {
                         tree_->sorter_->submitNextNodeForEmptying();
                     }

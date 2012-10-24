@@ -344,7 +344,7 @@ namespace cbt {
 
     bool CompressTree::rootNodeAvailable() {
         if (!rootNode_->input_buffer_->empty() ||
-                rootNode_->getQueueStatus() != NONE)
+                rootNode_->input_buffer_->getQueueStatus() != NONE)
             return false;
         return true;
     }

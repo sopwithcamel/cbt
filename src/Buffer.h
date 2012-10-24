@@ -31,6 +31,16 @@
 namespace cbt {
     class Node;
 
+    enum Action {
+        INGRESS_ONLY,
+        INGRESS,
+        SORT,
+        MERGE,
+        EMPTY,
+        EGRESS,
+        NONE
+    };
+
     class Buffer {
         friend class Node;
         friend class CompressTree;
@@ -90,6 +100,9 @@ namespace cbt {
           uint32_t numElements() const;
           void setParent(Node* n);
 
+          Action getQueueStatus();
+          void setQueueStatus(const Action& act);
+
           void setupPaging();
           void cleanupPaging();
 
@@ -109,6 +122,10 @@ namespace cbt {
           bool egressible_;
           // used during sort
           char** perm_;
+
+          // Queueing related status, condition variables and mutexes
+          enum Action queueStatus_;
+          pthread_spinlock_t queueStatusLock_;
 
           /* Paging-related */
           FILE* f_;

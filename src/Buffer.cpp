@@ -86,11 +86,14 @@ namespace cbt {
 
     Buffer::Buffer() :
             kPagingEnabled(false),
-            egressible_(true) {
+            egressible_(true),
+            queueStatus_(NONE) {
+        pthread_spin_init(&queueStatusLock_, PTHREAD_PROCESS_PRIVATE);
     }
 
     Buffer::~Buffer() {
         deallocate();
+        pthread_spin_destroy(&queueStatusLock_);
     }
 
     Buffer::List* Buffer::addList(bool isLarge/* = false */) {
@@ -134,6 +137,19 @@ namespace cbt {
 
     void Buffer::setParent(Node* n) {
         node_ = n;
+    }
+
+    Action Buffer::getQueueStatus() {
+        pthread_spin_lock(&queueStatusLock_);
+        Action ret = queueStatus_;
+        pthread_spin_unlock(&queueStatusLock_);
+        return ret;
+    }
+
+    void Buffer::setQueueStatus(const Action& act) {
+        pthread_spin_lock(&queueStatusLock_);
+        queueStatus_ = act;
+        pthread_spin_unlock(&queueStatusLock_);
     }
 
     void Buffer::quicksort(uint32_t uleft, uint32_t uright) {

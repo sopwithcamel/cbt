@@ -282,7 +282,7 @@ namespace cbt {
 
     void Sorter::work(Node* n) {
 #ifdef CT_NODE_DEBUG
-        assert(n->getQueueStatus() == SORT);
+        assert(n->input_buffer_->getQueueStatus() == SORT);
 #endif  // CT_NODE_DEBUG
         n->perform();
 
@@ -366,7 +366,7 @@ namespace cbt {
     void Emptier::work(Node* n) {
         n->wait(MERGE);
 #ifdef CT_NODE_DEBUG
-        assert(n->getQueueStatus() == EMPTY);
+        assert(n->input_buffer_->getQueueStatus() == EMPTY);
 #endif  // CT_NODE_DEBUG
         bool is_root = n->isRoot();
 
@@ -423,7 +423,7 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        Action act = n->getQueueStatus();
+        Action act = n->input_buffer_->getQueueStatus();
 
 #ifdef CT_NODE_DEBUG
         assert(act == INGRESS || act == INGRESS_ONLY || act == EGRESS);
@@ -436,16 +436,16 @@ namespace cbt {
             n->schedule(MERGE);
         } else if (act == INGRESS_ONLY) {
             // no further work if we're only decompressing
-            n->setQueueStatus(NONE);
+            n->input_buffer_->setQueueStatus(NONE);
         } else if (act == EGRESS) {
-            n->setQueueStatus(NONE);
+            n->input_buffer_->setQueueStatus(NONE);
         }
 
         n->done(act);
     }
 
     void Compressor::addNode(Node* node) {
-        Action act = node->getQueueStatus();
+        Action act = node->input_buffer_->getQueueStatus();
         if (act == EGRESS) {
             addNodeToQueue(node, /*priority=*/0);
         } else { // INGRESS || INGRESS_ONLY
@@ -478,7 +478,7 @@ namespace cbt {
         n->wait(INGRESS);
         // perform sort or merge
 #ifdef CT_NODE_DEBUG
-        Action act = n->getQueueStatus();
+        Action act = n->input_buffer_->getQueueStatus();
         assert(act == MERGE);
 #endif  // CT_NODE_DEBUG
         n->perform();

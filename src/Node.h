@@ -40,16 +40,6 @@ namespace cbt {
     class Compressor;
     class Merger;
 
-    enum Action {
-        INGRESS_ONLY,
-        INGRESS,
-        SORT,
-        MERGE,
-        EMPTY,
-        EGRESS,
-        NONE
-    };
-
     class Node {
         friend class CompressTree;
         friend class Buffer;
@@ -181,8 +171,6 @@ namespace cbt {
         void done(const Action& act);
         // 
         void schedule(const Action& act);
-        Action getQueueStatus();
-        void setQueueStatus(const Action& act);
 
         /* pointer to the tree */
         CompressTree* tree_;
@@ -198,10 +186,6 @@ namespace cbt {
         /* Pointers to children */
         std::vector<Node*> children_;
         uint32_t separator_;
-
-        // Queueing related status, condition variables and mutexes
-        enum Action queueStatus_;
-        pthread_spinlock_t queueStatusLock_;
 
         pthread_cond_t emptyCond_;
         pthread_mutex_t emptyMutex_;
