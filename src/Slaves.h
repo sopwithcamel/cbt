@@ -44,7 +44,7 @@ namespace cbt {
         explicit Slave(CompressTree* tree);
         virtual ~Slave() {}
         // Responsible for managing queueStatus
-        virtual void addNode(Node* node) = 0;
+        virtual void addNode(Node* node, BufferType type) = 0;
         // Returns true if there are no queued jobs and all threads are
         // sleeping; false otherwise
         virtual bool empty();
@@ -85,10 +85,11 @@ namespace cbt {
         virtual bool inputComplete();
 
         // get next node from (default: head of) queue or NULL if empty
-        virtual Node* getNextNode(bool fromHead = true);
+        virtual Node* getNextNode(BufferType& type);
 
         // add node to (default: tail of) queue
-        virtual bool addNodeToQueue(Node* node, uint32_t priority);
+        virtual bool addNodeToQueue(Node* node, uint32_t priority,
+                BufferType type);
 
         static void* callHelper(void* context);
         // the pthread execution function. It extracts Nodes added by
@@ -104,7 +105,7 @@ namespace cbt {
         virtual void checkSendCompletionNotice();
         virtual void setInputComplete(bool value);
         bool checkInputComplete();
-        virtual void work(Node* n) = 0;
+        virtual void work(Node* n, BufferType type) = 0;
 
         // Thread-mask related functions
         void setThreadSleep(uint32_t index);
@@ -145,8 +146,8 @@ namespace cbt {
       public:
         explicit Sorter(CompressTree* tree);
         ~Sorter();
-        void work(Node* n);
-        void addNode(Node* node);
+        void work(Node* n, BufferType type);
+        void addNode(Node* node, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;
@@ -164,8 +165,8 @@ namespace cbt {
       public:
         explicit Emptier(CompressTree* tree);
         ~Emptier();
-        void work(Node* n);
-        void addNode(Node* node);
+        void work(Node* n, BufferType type);
+        void addNode(Node* node, BufferType type);
         // Returns true if there are no queued jobs and all threads are
         // sleeping; false otherwise
         bool empty();
@@ -173,7 +174,7 @@ namespace cbt {
       protected:
         // Returns true if there are queued jobs; false otherwise
         bool more();
-        virtual Node* getNextNode(bool fromHead = true);
+        virtual Node* getNextNode(BufferType& type);
         virtual std::string getSlaveName() const;
         void printElements();
 
@@ -187,8 +188,8 @@ namespace cbt {
       public:
         explicit Compressor(CompressTree* tree);
         ~Compressor();
-        void work(Node* n);
-        void addNode(Node* node);
+        void work(Node* n, BufferType type);
+        void addNode(Node* node, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;
@@ -201,8 +202,8 @@ namespace cbt {
       public:
         explicit Merger(CompressTree* tree);
         ~Merger();
-        void work(Node* n);
-        void addNode(Node* node);
+        void work(Node* n, BufferType type);
+        void addNode(Node* node, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;
@@ -215,8 +216,8 @@ namespace cbt {
       public:
         explicit Pager(CompressTree* tree);
         ~Pager();
-        void work(Node* n);
-        void addNode(Node* node);
+        void work(Node* n, BufferType type);
+        void addNode(Node* node, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;
@@ -230,8 +231,8 @@ namespace cbt {
       public:
         explicit Monitor(CompressTree* tree);
         ~Monitor();
-        void work(Node* n);
-        void addNode(Node* n);
+        void work(Node* n, BufferType type);
+        void addNode(Node* n, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;

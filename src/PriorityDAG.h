@@ -47,6 +47,7 @@ namespace cbt {
 
     typedef struct {
         Node* node;
+        BufferType buffer_type;
         uint32_t prio; // node priority
     } NodeInfo;
     struct NodeInfoCompare {
@@ -78,14 +79,13 @@ namespace cbt {
         // Insert element into queue. Returns true if the element is enabled to
         // empty immediately or false otherwise.
         bool insert(Node* n) {
-            // check if all of the node's children have queueStatus_ >=
-            // COMPRESSED (i.e. COMPRESS, PAGEOUT or NONE).
+            // check if any of the node's children have both buffers full. If
+            // so, we can't empty.
             bool canEmpty = true;
             uint32_t i, s = n->children_.size();
             std::set<uint32_t>* d = new std::set<uint32_t>();
             for (i = 0; i < s; ++i) {
-                if (n->children_[i]->input_buffer_->getQueueStatus() <
-                        EGRESS) {
+                if (n->children_[i]->both_buffers_full()) {
                     canEmpty = false;
                     d->insert(n->children_[i]->id());
                 }
@@ -96,6 +96,7 @@ namespace cbt {
     
                 NodeInfo* ni = new NodeInfo();
                 ni->node = n;
+                ni->buffer_type = EMPTY_BUFFER;
                 ni->prio = n->level();
                 enabNodes_.push(ni);
             } else { // disabled queue
@@ -123,8 +124,8 @@ namespace cbt {
         }
 
         void post(Node* n) {
-            // If parent is present, it must be in the disabled queue.
-            // remove n from its parent's dependency list
+            // Check if parent is present and if it's in the disabled queue.
+            // If so, then remove n from the parent's dependency list
             if (n->parent_ && n->parent_->input_buffer_->getQueueStatus() ==
                     EMPTY) {
                 DisabledDAG::iterator parent_it = disabNodes_.find(n->parent_);
@@ -139,6 +140,7 @@ namespace cbt {
                     if (ch->empty()) {
                         NodeInfo* np = new NodeInfo();
                         np->node = n->parent_;
+                        np->buffer_type = EMPTY_BUFFER;
                         np->prio = n->parent_->level();
                         enabNodes_.push(np);
 

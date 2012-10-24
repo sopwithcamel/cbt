@@ -76,6 +76,7 @@ namespace cbt {
                 uint64_t max);
         bool nextValue(void*& hash, PartialAgg*& agg);
         void clear();
+        const Operations* ops() const { return ops_; }
 
       private:
         friend class Node;
@@ -105,7 +106,7 @@ namespace cbt {
         const uint32_t a_;
         const uint32_t b_;
         uint32_t nodeCtr;
-        const Operations* const ops;
+        const Operations* const ops_;
         CompressAlgorithm alg_;
         Node* rootNode_;
         Node* inputNode_;

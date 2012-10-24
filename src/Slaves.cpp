@@ -64,7 +64,7 @@ namespace cbt {
         return ret;
     }
 
-    Node* Slave::getNextNode(bool fromHead) {
+    Node* Slave::getNextNode(BufferType& type) {
         Node* ret;
         pthread_spin_lock(&nodesLock_);
         if (nodes_.empty()) {
@@ -73,16 +73,18 @@ namespace cbt {
             NodeInfo* ni = nodes_.top();
             nodes_.pop();
             ret = ni->node;
+            type = ni->buffer_type;
             delete ni;
         }
         pthread_spin_unlock(&nodesLock_);
         return ret;
     }
 
-    bool Slave::addNodeToQueue(Node* n, uint32_t priority) {
+    bool Slave::addNodeToQueue(Node* n, uint32_t priority, BufferType type) {
         pthread_spin_lock(&nodesLock_);
         NodeInfo* ni = new NodeInfo();
         ni->node = n;
+        ni->buffer_type = type;
         ni->prio = priority;
         nodes_.push(ni);
         pthread_spin_unlock(&nodesLock_);
@@ -199,17 +201,18 @@ namespace cbt {
 
             // Actually do Slave work
             while (true) {
-                Node* n = getNextNode();
+                BufferType type;
+                Node* n = getNextNode(type);
                 if (!n)
                     break;
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "%s (%d): working on node: %d (size: %u)\t",
                         getSlaveName().c_str(), me->index_, n->id_,
-                        n->buffer_.numElements());
+                        n->buffer(type)->numElements());
                 fprintf(stderr, "remaining: ");
                 printElements();
-#endif
-                work(n);
+#endif  // CT_NODE_DEBUG
+                work(n, type);
             }
             if (checkInputComplete())
                 break;
@@ -280,20 +283,21 @@ namespace cbt {
         pthread_mutex_destroy(&sortedNodesMutex_);
     }
 
-    void Sorter::work(Node* n) {
+    void Sorter::work(Node* n, BufferType type) {
 #ifdef CT_NODE_DEBUG
-        assert(n->input_buffer_->getQueueStatus() == SORT);
+        Buffer* buffer;
+        assert(n->buffer(INSERT_BUFFER)->getQueueStatus() == SORT);
 #endif  // CT_NODE_DEBUG
-        n->perform();
+        n->perform(INSERT_BUFFER);
 
         addToSorted(n); 
     }
 
-    void Sorter::addNode(Node* node) {
-        addNodeToQueue(node, node->level());
+    void Sorter::addNode(Node* node, BufferType type) {
+        addNodeToQueue(node, node->level(), type);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
-                node->id_, node->buffer_.numElements());
+                node->id_, node->buffer(type)->numElements());
         printElements();
 #endif
     }
@@ -355,22 +359,26 @@ namespace cbt {
         return !ret;
     }
 
-    Node* Emptier::getNextNode(bool fromHead) {
+    Node* Emptier::getNextNode(BufferType& type) {
         Node* ret;
         pthread_spin_lock(&nodesLock_);
         ret = queue_.pop();
         pthread_spin_unlock(&nodesLock_);
+        if (ret && ret->isRoot())
+            type = INSERT_BUFFER;
+        else
+            type = EMPTY_BUFFER;
         return ret;
     }
 
-    void Emptier::work(Node* n) {
+    void Emptier::work(Node* n, BufferType type) {
         n->wait(MERGE);
 #ifdef CT_NODE_DEBUG
-        assert(n->input_buffer_->getQueueStatus() == EMPTY);
+        assert(n->buffer(type)->getQueueStatus() == EMPTY);
 #endif  // CT_NODE_DEBUG
         bool is_root = n->isRoot();
 
-        n->perform();
+        n->perform(type);
 
         // No other node is dependent on the root. Performing this check also
         // avoids the problem, where perform() causes the creation of a new
@@ -388,13 +396,14 @@ namespace cbt {
         n->done(EMPTY);
     }
 
-    void Emptier::addNode(Node* node) {
+    void Emptier::addNode(Node* node, BufferType type) {
         pthread_spin_lock(&nodesLock_);
         bool ret = queue_.insert(node);
         pthread_spin_unlock(&nodesLock_);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to to-empty list: ",
-                node->id_, node->buffer_.numElements(), ret? "True" : "False");
+                node->id_, node->buffer(type)->numElements(),
+                ret? "True" : "False");
         printElements();
 #endif
     }
@@ -422,39 +431,39 @@ namespace cbt {
     Compressor::~Compressor() {
     }
 
-    void Compressor::work(Node* n) {
-        Action act = n->input_buffer_->getQueueStatus();
+    void Compressor::work(Node* n, BufferType type) {
+        Action act = n->buffer(type)->getQueueStatus();
 
 #ifdef CT_NODE_DEBUG
         assert(act == INGRESS || act == INGRESS_ONLY || act == EGRESS);
 #endif  // CT_NODE_DEBUG
 
-        n->perform();
+        n->perform(type);
 
         // schedule to sort
         if (act == INGRESS) {
             n->schedule(MERGE);
         } else if (act == INGRESS_ONLY) {
             // no further work if we're only decompressing
-            n->input_buffer_->setQueueStatus(NONE);
+            n->buffer(INSERT_BUFFER)->setQueueStatus(NONE);
         } else if (act == EGRESS) {
-            n->input_buffer_->setQueueStatus(NONE);
+            n->buffer(INSERT_BUFFER)->setQueueStatus(NONE);
         }
 
         n->done(act);
     }
 
-    void Compressor::addNode(Node* node) {
-        Action act = node->input_buffer_->getQueueStatus();
+    void Compressor::addNode(Node* node, BufferType type) {
+        Action act = node->buffer(INSERT_BUFFER)->getQueueStatus();
         if (act == EGRESS) {
-            addNodeToQueue(node, /*priority=*/0);
+            addNodeToQueue(node, /*priority=*/0, type);
         } else { // INGRESS || INGRESS_ONLY
-            addNodeToQueue(node, /*priority=*/node->level());
+            addNodeToQueue(node, /*priority=*/node->level(), type);
         }
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
-                node->id_, node->buffer_.numElements(),
+                node->id_, node->buffer(type)->numElements(),
                 act == EGRESS? "compress" : "decompress");
         printElements();
 #endif  // CT_NODE_DEBUG
@@ -473,29 +482,29 @@ namespace cbt {
     Merger::~Merger() {
     }
 
-    void Merger::work(Node* n) {
+    void Merger::work(Node* n, BufferType type) {
         // block until buffer is decompressed
         n->wait(INGRESS);
         // perform sort or merge
 #ifdef CT_NODE_DEBUG
-        Action act = n->input_buffer_->getQueueStatus();
+        Action act = n->buffer(EMPTY_BUFFER)->getQueueStatus();
         assert(act == MERGE);
 #endif  // CT_NODE_DEBUG
-        n->perform();
+        n->perform(EMPTY_BUFFER);
         // schedule for emptying
         n->schedule(EMPTY);
         // indicate that we're done sorting
         n->done(MERGE);
     }
 
-    void Merger::addNode(Node* node) {
+    void Merger::addNode(Node* node, BufferType type) {
         if (node) {
             // Set node as queued for emptying
-            addNodeToQueue(node, node->level());
+            addNodeToQueue(node, node->level(), type);
 
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",
-                    node->id_, node->buffer_.numElements());
+                    node->id_, node->buffer(type)->numElements());
             printElements();
 #endif  // CT_NODE_DEBUG
         }
@@ -555,7 +564,7 @@ namespace cbt {
     Monitor::~Monitor() {
     }
 
-    void Monitor::work(Node* n) {
+    void Monitor::work(Node* n, BufferType type) {
         pthread_barrier_wait(&tree_->threadsBarrier_);
         while (!inputComplete()) {
             sleep(1);
@@ -571,7 +580,7 @@ namespace cbt {
         elctr.clear();
     }
 
-    void Monitor::addNode(Node* n) {
+    void Monitor::addNode(Node* n, BufferType type) {
         return;
     }
 

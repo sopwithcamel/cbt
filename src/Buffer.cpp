@@ -128,6 +128,15 @@ namespace cbt {
         return (numElements() == 0);
     }
 
+    bool Buffer::full() const {
+        return (numElements() > EMPTY_THRESHOLD);
+    }
+
+    bool Buffer::available_for_insertion() {
+        // if status is EGRESS or NONE, then 
+        return (getQueueStatus() >= EGRESS);
+    }
+
     uint32_t Buffer::numElements() const {
         uint32_t num = 0;
         for (uint32_t i = 0; i < lists_.size(); ++i)
@@ -300,6 +309,242 @@ namespace cbt {
 
         // quicksort elements
         quicksort(0, num - 1);
+        return true;
+    }
+
+    bool Buffer::merge() {
+        std::priority_queue<MergeElement,
+                std::vector<MergeElement>,
+                MergeComparator> queue;
+
+        if (lists_.size() == 1 || empty())
+            return true;
+
+        // initialize aux buffer
+        Buffer aux;
+        List* a;
+        if (numElements() < MAX_ELS_PER_BUFFER)
+            a = aux.addList();
+        else
+            a = aux.addList(/*large buffer=*/true);
+
+        // Load each of the list heads into the priority queue
+        // keep track of offsets for possible deserialization
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
+            if (lists_[i]->num_ > 0) {
+                MergeElement* mge = new MergeElement(lists_[i]);
+                queue.push(*mge);
+            }
+        }
+
+        while (!queue.empty()) {
+            MergeElement n = queue.top();
+            queue.pop();
+
+            // copy hash values
+            a->hashes_[a->num_] = n.hash();
+            uint32_t buf_size = n.size();
+            a->sizes_[a->num_] = buf_size;
+            // memset(a->data_ + a->size_, 0, buf_size);
+            memmove(a->data_ + a->size_,
+                    reinterpret_cast<void*>(n.data()), buf_size);
+            a->size_ += buf_size;
+            a->num_++;
+/*
+            if (a->num_ >= MAX_ELS_PER_BUFFER) {
+                fprintf(stderr, "Num elements: %u\n", a->num_);
+                assert(false);
+            }
+*/
+            // increment n pointer and re-insert n into prioQ
+            if (n.next())
+                queue.push(n);
+        }
+
+        // clear buffer and copy over aux.
+        // aux itself is on the stack and will be destroyed
+        deallocate();
+        lists_ = aux.lists_;
+        aux.clear();
+
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d merged; new size: %d\n", node_->id(),
+                numElements());
+#endif  // CT_NODE_DEBUG
+        return true;
+    }
+
+    bool Buffer::aggregate(bool isRoot) {
+        const Operations* ops = node_->tree_->ops();
+
+        PartialAgg *lastPAO, *thisPAO;
+        // Check that PAOs are actually created
+        assert(1 == ops->createPAO(NULL, &lastPAO));
+        assert(1 == ops->createPAO(NULL, &thisPAO));
+
+        if (empty())
+            return true;
+        // initialize aux buffer
+        Buffer aux;
+
+        if (isRoot) { 
+            List* a = aux.addList();
+
+            // aggregate elements in buffer
+            uint32_t lastIndex = 0;
+            Buffer::List* l = lists_[0];
+            for (uint32_t i = 1; i < l->num_; ++i) {
+                if (l->hashes_[i] == l->hashes_[lastIndex]) {
+                    // aggregate elements
+                    if (i == lastIndex + 1) {
+                        if (!(ops->deserialize(lastPAO, perm_[lastIndex],
+                                        l->sizes_[lastIndex]))) {
+                            fprintf(stderr, "Error at index %d\n", i);
+                            assert(false);
+                        }
+                    }
+                    assert(ops->deserialize(thisPAO, perm_[i], l->sizes_[i]));
+                    if (ops->sameKey(thisPAO, lastPAO)) {
+                        ops->merge(lastPAO, thisPAO);
+                        continue;
+                    }
+                }
+                // copy hash and size into auxBuffer_
+                a->hashes_[a->num_] = l->hashes_[lastIndex];
+                if (i == lastIndex + 1) {
+                    // the size wouldn't have changed
+                    a->sizes_[a->num_] = l->sizes_[lastIndex];
+                    //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                    memmove(a->data_ + a->size_,
+                            reinterpret_cast<void*>(perm_[lastIndex]),
+                            l->sizes_[lastIndex]);
+                    a->size_ += l->sizes_[lastIndex];
+                } else {
+                    uint32_t buf_size = ops->getSerializedSize(lastPAO);
+                    ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
+
+                    a->sizes_[a->num_] = buf_size;
+                    a->size_ += buf_size;
+                }
+                a->num_++;
+                lastIndex = i;
+            }
+            // copy the last PAO; TODO: Clean this up!
+            // copy hash and size into auxBuffer_
+            if (lastIndex == l->num_-1) {
+                a->hashes_[a->num_] = l->hashes_[lastIndex];
+                // the size wouldn't have changed
+                a->sizes_[a->num_] = l->sizes_[lastIndex];
+                // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                memmove(a->data_ + a->size_,
+                        reinterpret_cast<void*>(perm_[lastIndex]),
+                        l->sizes_[lastIndex]);
+                a->size_ += l->sizes_[lastIndex];
+            } else {
+                uint32_t buf_size = ops->getSerializedSize(lastPAO);
+                ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
+
+                a->hashes_[a->num_] = l->hashes_[lastIndex];
+                a->sizes_[a->num_] = buf_size;
+                a->size_ += buf_size;
+            }
+            a->num_++;
+
+            // free pointer memory
+            free(perm_);
+        } else { // aggregating merged buffer
+            List* a;
+            if (numElements() < MAX_ELS_PER_BUFFER)
+                a = aux.addList();
+            else
+                a = aux.addList(/*isLarge=*/true);
+
+            Buffer::List* l = lists_[0];
+            uint32_t num = numElements();
+            uint32_t numMerged = 0;
+            uint32_t offset = 0;
+
+            uint32_t lastIndex = 0;
+            offset += l->sizes_[0];
+            uint32_t lastOffset = 0;
+
+            // aggregate elements in buffer
+            for (uint32_t i = 1; i < num; ++i) {
+                if (l->hashes_[i] == l->hashes_[lastIndex]) {
+                    if (numMerged == 0) {
+                        if (!(ops->deserialize(lastPAO, l->data_ + lastOffset,
+                                l->sizes_[lastIndex]))) {
+                            fprintf(stderr, "Can't deserialize at %u, index: %u\n",
+                                    lastOffset, lastIndex);
+                            assert(false);
+                        }
+                    }
+                    if (!(ops->deserialize(thisPAO, l->data_ + offset,
+                                    l->sizes_[i]))) {
+                        fprintf(stderr, "Can't deserialize at %u, index: %u\n",
+                                offset, i);
+                        assert(false);
+                    }
+                    if (ops->sameKey(thisPAO, lastPAO)) {
+                        ops->merge(lastPAO, thisPAO);
+                        numMerged++;
+                        offset += l->sizes_[i];
+                        continue;
+                    }
+                }
+                a->hashes_[a->num_] = l->hashes_[lastIndex];
+                if (numMerged == 0) {
+                    uint32_t buf_size = l->sizes_[lastIndex];
+                    a->sizes_[a->num_] = l->sizes_[lastIndex];
+                    // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                    memmove(a->data_ + a->size_,
+                            reinterpret_cast<void*>(l->data_ + lastOffset),
+                            l->sizes_[lastIndex]);
+                    a->size_ += buf_size;
+                } else {
+                    uint32_t buf_size = ops->getSerializedSize(lastPAO);
+                    ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
+                    a->sizes_[a->num_] = buf_size;
+                    a->size_ += buf_size;
+                }
+                a->num_++;
+                numMerged = 0;
+                lastIndex = i;
+                lastOffset = offset;
+                offset += l->sizes_[i];
+            }
+            // copy last PAO
+            a->hashes_[a->num_] = l->hashes_[lastIndex];
+            if (numMerged == 0) {
+                uint32_t buf_size = l->sizes_[lastIndex];
+                a->sizes_[a->num_] = l->sizes_[lastIndex];
+                // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                memmove(a->data_ + a->size_,
+                        reinterpret_cast<void*>(l->data_ + lastOffset),
+                        l->sizes_[lastIndex]);
+                a->size_ += buf_size;
+            } else {
+                uint32_t buf_size = ops->getSerializedSize(lastPAO);
+                ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
+                a->sizes_[a->num_] = buf_size;
+                a->size_ += buf_size;
+            }
+            a->num_++;
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d aggregated from %u to %u\n", node_->id_,
+                    numElements(), aux.numElements());
+#endif
+        }
+
+        // clear buffer and shallow copy aux into buffer
+        // aux is on stack and will be destroyed
+        deallocate();
+        lists_ = aux.lists_;
+        aux.clear();
+
+        ops->destroyPAO(lastPAO);
+        ops->destroyPAO(thisPAO);
+
         return true;
     }
 

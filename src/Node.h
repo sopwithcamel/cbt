@@ -50,43 +50,6 @@ namespace cbt {
         friend class Slave;
         friend class PriorityDAG;
 
-        class MergeElement {
-          public:
-            explicit MergeElement(Buffer::List* l) {
-                ind = off = 0;
-                list = l;
-            }
-            uint32_t hash() {
-                return list->hashes_[ind];
-            }
-            uint32_t size() {
-                return list->sizes_[ind];
-            }
-            char* data() {
-                return list->data_ + off;
-            }
-            bool next() {
-                if (ind >= list->num_-1) {
-                    return false;
-                }
-                off += list->sizes_[ind];
-                ind++;
-                return true;
-            }
-            uint32_t ind;           // index of hash being compared
-            uint32_t off;           // offset of serialized PAO
-            Buffer::List* list;     // list containing element
-        };
-
-        class MergeComparator {
-          public:
-            bool operator()(const MergeElement& lhs,
-                    const MergeElement& rhs) const {
-                return (lhs.list->hashes_[lhs.ind] >
-                        rhs.list->hashes_[rhs.ind]);
-            }
-        };
-
       public:
         explicit Node(CompressTree* tree, uint32_t level);
         ~Node();
@@ -98,7 +61,6 @@ namespace cbt {
         bool isLeaf() const;
         bool isRoot() const;
 
-        bool isFull() const;
         uint32_t level() const;
         uint32_t id() const;
 
@@ -120,18 +82,20 @@ namespace cbt {
          *    handleFullLeaves() call.
          */
         bool emptyBuffer();
-        /* Sort the root buffer based on hash value. All other nodes can
-         * aggregating by merging. */
-        bool sortBuffer();
-        /* Aggregate the sorted root buffer */
-        bool aggregateSortedBuffer();
-        bool aggregateMergedBuffer();
-        /* Merge the sorted sub-lists of the buffer */
-        bool mergeBuffer();
         /* copy contents from node's buffer into this buffer. Starting from
          * index = index, copy num elements' data.
          */
         bool copyIntoBuffer(Buffer::List* l, uint32_t index, uint32_t num);
+        // switch the input and emptying buffers
+        void switchBuffers();
+
+        // double-buffering stuff
+        bool both_buffers_full();
+        void set_both_buffers_full(bool both_full);
+
+        Buffer* buffer(BufferType type) const {
+            return (type == INSERT_BUFFER? input_buffer_ : empty_buffer_);
+        }
 
         /* Tree-related functions */
 
@@ -163,7 +127,7 @@ namespace cbt {
         // action and does not check. For example, perform(MERGE) will directly
         // sort/merge the buffer. The caller has to ensure that the buffer is
         // already decompressed.
-        void perform();
+        void perform(BufferType type);
         // Check if the node is currently queued up for Action act and
         // block until receipt of signal indicating completion.
         void wait(const Action& act);
@@ -176,12 +140,16 @@ namespace cbt {
         CompressTree* tree_;
         /* Buffer */
         Buffer* input_buffer_;
+        Buffer* empty_buffer_;
+        bool empty_buffer_available_;
+        bool both_buffers_full_;
+        pthread_spinlock_t buffer_availability_lock_;
+
         pthread_mutex_t stateMutex_;
         uint32_t id_;
         /* level in the tree; 0 at leaves and increases upwards */
         uint32_t level_;
         Node* parent_;
-        PartialAgg *lastPAO, *thisPAO;
 
         /* Pointers to children */
         std::vector<Node*> children_;

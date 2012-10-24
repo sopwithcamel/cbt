@@ -41,6 +41,11 @@ namespace cbt {
         NONE
     };
 
+    typedef enum {
+        INSERT_BUFFER,
+        EMPTY_BUFFER,
+    } BufferType;
+
     class Buffer {
         friend class Node;
         friend class CompressTree;
@@ -48,87 +53,132 @@ namespace cbt {
 
         public:
 
-          class List {
+        class List {
             public:
-              enum ListState {
-                  IN,
-                  OUT
-              };
-              List();
-              ~List();
-              /* allocates buffers */
-              void allocate(bool isLarge);
-              /* frees allocated buffers. Maintains counter info */
-              void deallocate();
-              /* set list to empty */
-              void setEmpty();
+                enum ListState {
+                    IN,
+                    OUT
+                };
+                List();
+                ~List();
+                /* allocates buffers */
+                void allocate(bool isLarge);
+                /* frees allocated buffers. Maintains counter info */
+                void deallocate();
+                /* set list to empty */
+                void setEmpty();
 
-              static uint64_t allocated_lists;
+                static uint64_t allocated_lists;
 
-              uint32_t* hashes_;
-              uint32_t* sizes_;
-              char* data_;
-              uint32_t num_;
-              uint32_t size_;
-              ListState state_;
-              size_t c_hashlen_;
-              size_t c_sizelen_;
-              size_t c_datalen_;
-          };
+                uint32_t* hashes_;
+                uint32_t* sizes_;
+                char* data_;
+                uint32_t num_;
+                uint32_t size_;
+                ListState state_;
+                size_t c_hashlen_;
+                size_t c_sizelen_;
+                size_t c_datalen_;
+        };
 
-          const bool kPagingEnabled;
+        class MergeElement {
+            public:
+                explicit MergeElement(Buffer::List* l) {
+                    ind = off = 0;
+                    list = l;
+                }
+                uint32_t hash() {
+                    return list->hashes_[ind];
+                }
+                uint32_t size() {
+                    return list->sizes_[ind];
+                }
+                char* data() {
+                    return list->data_ + off;
+                }
+                bool next() {
+                    if (ind >= list->num_-1) {
+                        return false;
+                    }
+                    off += list->sizes_[ind];
+                    ind++;
+                    return true;
+                }
+                uint32_t ind;           // index of hash being compared
+                uint32_t off;           // offset of serialized PAO
+                Buffer::List* list;     // list containing element
+        };
 
-          Buffer();
-          Buffer(const Buffer&);
-          // clears all buffer state
-          ~Buffer();
-          // add a list and allocate memory
-          List* addList(bool isLarge = false);
-          void addList(List* l);
-          /* clear the lists_ vector. This does not free space allocated
-           * for the buffers but merely deletes the pointers. To avoid
-           * memory leaks, this must be called after deallocate() */
-          void delList(uint32_t ind);
-          void clear();
-          /* frees buffers in all the lists. This maintains all the count
-           * information about each of the lists */
-          void deallocate();
-          /* returns true if the sum of all the list_s[i]->num_ is zero. This
-           * can happen even if no memory is allocated to the buffers as all
-           * buffers may be compressed */
-          bool empty() const;
-          uint32_t numElements() const;
-          void setParent(Node* n);
+        class MergeComparator {
+            public:
+                bool operator()(const MergeElement& lhs,
+                        const MergeElement& rhs) const {
+                    return (lhs.list->hashes_[lhs.ind] >
+                            rhs.list->hashes_[rhs.ind]);
+                }
+        };
 
-          Action getQueueStatus();
-          void setQueueStatus(const Action& act);
+        const bool kPagingEnabled;
 
-          void setupPaging();
-          void cleanupPaging();
+        Buffer();
+        Buffer(const Buffer&);
+        // clears all buffer state
+        ~Buffer();
+        // add a list and allocate memory
+        List* addList(bool isLarge = false);
+        void addList(List* l);
+        /* clear the lists_ vector. This does not free space allocated
+         * for the buffers but merely deletes the pointers. To avoid
+         * memory leaks, this must be called after deallocate() */
+        void delList(uint32_t ind);
+        void clear();
+        /* frees buffers in all the lists. This maintains all the count
+         * information about each of the lists */
+        void deallocate();
+        /* returns true if the sum of all the list_s[i]->num_ is zero. This
+         * can happen even if no memory is allocated to the buffers as all
+         * buffers may be compressed */
+        bool empty() const;
+        bool full() const;
+        bool available_for_insertion();
+        uint32_t numElements() const;
+        void setParent(Node* n);
 
-          /* Sorting-related */
-          void quicksort(uint32_t left, uint32_t right);
-          bool sort();
+        Action getQueueStatus();
+        void setQueueStatus(const Action& act);
 
-          /* Compression-related */
-          bool egress();
-          bool ingress();
-          void setEgressible(bool flag);
+        void setupPaging();
+        void cleanupPaging();
+
+        /* Sorting-related */
+        void quicksort(uint32_t left, uint32_t right);
+        // Sort the root buffer based on hash value. All other nodes can
+        // aggregating by merging.
+        bool sort();
+
+        // Merge the sorted sub-lists of the buffer
+        bool merge();
+        bool aggregate(bool isRoot);
+
+        /* Compression-related */
+        bool egress();
+        bool ingress();
+        void setEgressible(bool flag);
 
         private:
-          const Node* node_;
-          /* buffer fragments */
-          std::vector<List*> lists_;
-          bool egressible_;
-          // used during sort
-          char** perm_;
+        const Node* node_;
+        /* buffer fragments */
+        std::vector<List*> lists_;
+        bool egressible_;
+        // used during sort
+        char** perm_;
 
-          // Queueing related status, condition variables and mutexes
-          enum Action queueStatus_;
-          pthread_spinlock_t queueStatusLock_;
+        // Queueing related status, condition variables and mutexes
+        enum Action queueStatus_;
+        pthread_spinlock_t queueStatusLock_;
 
-          /* Paging-related */
-          FILE* f_;
+        /* Paging-related */
+        FILE* f_;
     };
 }
 #endif  // SRC_BUFFER_H_

@@ -41,6 +41,9 @@ namespace cbt {
     Node::Node(CompressTree* tree, uint32_t level) :
             tree_(tree),
             input_buffer_(NULL),
+            empty_buffer_(NULL),
+            empty_buffer_available_(true),
+            both_buffers_full_(false),
             level_(level),
             parent_(NULL) {
         id_ = tree_->nodeCtr++;
@@ -49,9 +52,9 @@ namespace cbt {
         input_buffer_->setParent(this);
         input_buffer_->setupPaging();
 
-        // Check that PAOs are actually created
-        assert(1 == tree_->ops->createPAO(NULL, &lastPAO));
-        assert(1 == tree_->ops->createPAO(NULL, &thisPAO));
+        empty_buffer_ = new Buffer();
+        empty_buffer_->setParent(this);
+        empty_buffer_->setupPaging();
 
         pthread_mutex_init(&emptyMutex_, NULL);
         pthread_cond_init(&emptyCond_, NULL);
@@ -61,12 +64,12 @@ namespace cbt {
 
         pthread_mutex_init(&xgressMutex_, NULL);
         pthread_cond_init(&xgressCond_, NULL);
+
+        pthread_spin_init(&buffer_availability_lock_,
+                PTHREAD_PROCESS_PRIVATE);
     }
 
     Node::~Node() {
-        tree_->ops->destroyPAO(lastPAO);
-        tree_->ops->destroyPAO(thisPAO);
-
         pthread_mutex_destroy(&sortMutex_);
         pthread_cond_destroy(&sortCond_);
 
@@ -78,11 +81,12 @@ namespace cbt {
             delete input_buffer_;
             input_buffer_ = NULL;
         }
+        pthread_spin_destroy(&buffer_availability_lock_);
     }
 
     bool Node::insert(PartialAgg* agg) {
-        uint32_t buf_size = tree_->ops->getSerializedSize(agg);
-        const char* key = tree_->ops->getKey(agg);
+        uint32_t buf_size = tree_->ops()->getSerializedSize(agg);
+        const char* key = tree_->ops()->getKey(agg);
 
         // copy into Buffer fields
         Buffer::List* l = input_buffer_->lists_[0];
@@ -90,7 +94,7 @@ namespace cbt {
         l->sizes_[l->num_] = buf_size;
         // is this required?
 //        memset(l->data_ + l->size_, 0, buf_size);
-        tree_->ops->serialize(agg, l->data_ + l->size_,
+        tree_->ops()->serialize(agg, l->data_ + l->size_,
                 buf_size);
         l->size_ += buf_size;
         l->num_++;
@@ -114,7 +118,8 @@ namespace cbt {
 
     bool Node::emptyOrEgress() {
         bool ret = true;
-        if (tree_->emptyType_ == ALWAYS || isFull()) {
+        if (tree_->emptyType_ == ALWAYS || input_buffer_->full()) {
+            switchBuffers();
             ret = spillBuffer();
         } else {
             schedule(EGRESS);
@@ -132,16 +137,22 @@ namespace cbt {
         uint32_t curElement = 0;
         uint32_t lastElement = 0;
 
+        Buffer* buffer;
+        if (isRoot())
+            buffer = input_buffer_;
+        else
+            buffer = empty_buffer_;
+
         /* if i am a leaf node, queue up for action later after all the
          * internal nodes have been processed */
         if (isLeaf()) {
             /* this may be called even when buffer is not full (when flushing
              * all buffers at the end). */
-            if (isFull() || isRoot()) {
+            if (buffer->full() || isRoot()) {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
-                        %u/%u\n", id_, input_buffer_->numElements(),
+                        %u/%u\n", id_, buffer->numElements(),
                         EMPTY_THRESHOLD);
 #endif
             } else {  // compress
@@ -150,13 +161,13 @@ namespace cbt {
             return true;
         }
 
-        if (input_buffer_->empty()) {
+        if (buffer->empty()) {
             for (curChild = 0; curChild < children_.size(); curChild++) {
                 children_[curChild]->emptyOrEgress();
             }
         } else {
             checkSerializationIntegrity();
-            Buffer::List* l = input_buffer_->lists_[0];
+            Buffer::List* l = buffer->lists_[0];
             // find the first separator strictly greater than the first element
             while (l->hashes_[curElement] >=
                     children_[curChild]->separator_) {
@@ -177,10 +188,10 @@ namespace cbt {
                 child: %d); first element: %u\n", id_, children_[curChild]->id_,
                     children_[curChild]->separator_, curChild, l->hashes_[0]);
 #endif
-            uint32_t num = input_buffer_->numElements();
+            uint32_t num = buffer->numElements();
 #ifdef ENABLE_ASSERT_CHECKS
             // there has to be a single list in the buffer at this point
-            assert(input_buffer_->lists_.size() == 1);
+            assert(buffer->lists_.size() == 1);
 #endif
             while (curElement < num) {
                 if (l->hashes_[curElement] >=
@@ -245,7 +256,7 @@ namespace cbt {
             l->setEmpty();
 
             if (!isRoot()) {
-                input_buffer_->deallocate();
+                buffer->deallocate();
             }
         }
         // Split leaves can cause the number of children to increase. Check.
@@ -255,275 +266,21 @@ namespace cbt {
         return true;
     }
 
-    bool Node::sortBuffer() {
-        bool ret = input_buffer_->sort();
-        checkIntegrity();
-        return ret;
-    }
-
-    bool Node::aggregateSortedBuffer() {
-        // initialize auxiliary buffer
-        Buffer aux;
-        Buffer::List* a = aux.addList();
-
-        // aggregate elements in buffer
-        uint32_t lastIndex = 0;
-        Buffer::List* l = input_buffer_->lists_[0];
-        for (uint32_t i = 1; i < l->num_; ++i) {
-            if (l->hashes_[i] == l->hashes_[lastIndex]) {
-                // aggregate elements
-                if (i == lastIndex + 1) {
-                    if (!(tree_->ops->deserialize(lastPAO,
-                            input_buffer_->perm_[lastIndex],
-                            l->sizes_[lastIndex]))) {
-                        fprintf(stderr, "Error at index %d\n", i);
-                        assert(false);
-                    }
-                }
-                assert(tree_->ops->deserialize(thisPAO, input_buffer_->perm_[i],
-                        l->sizes_[i]));
-                if (tree_->ops->sameKey(thisPAO, lastPAO)) {
-                    tree_->ops->merge(lastPAO, thisPAO);
-#ifdef ENABLE_COUNTERS
-                    tree_->monitor_->numElements--;
-                    tree_->monitor_->numMerged++;
-                    tree_->monitor_->cctr++;
-#endif
-                    continue;
-                }
-            }
-            // copy hash and size into auxBuffer_
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            if (i == lastIndex + 1) {
-                // the size wouldn't have changed
-                a->sizes_[a->num_] = l->sizes_[lastIndex];
-//                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-                memmove(a->data_ + a->size_,
-                        reinterpret_cast<void*>(input_buffer_->perm_[lastIndex]),
-                        l->sizes_[lastIndex]);
-                a->size_ += l->sizes_[lastIndex];
-            } else {
-                uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-                tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-
-                a->sizes_[a->num_] = buf_size;
-                a->size_ += buf_size;
-#ifdef ENABLE_COUNTERS
-                tree_->monitor_->bctr++;
-#endif
-            }
-            a->num_++;
-            lastIndex = i;
-        }
-        // copy the last PAO; TODO: Clean this up!
-        // copy hash and size into auxBuffer_
-        if (lastIndex == l->num_-1) {
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            // the size wouldn't have changed
-            a->sizes_[a->num_] = l->sizes_[lastIndex];
-            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(input_buffer_->perm_[lastIndex]),
-                    l->sizes_[lastIndex]);
-            a->size_ += l->sizes_[lastIndex];
-        } else {
-            uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-            tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            a->sizes_[a->num_] = buf_size;
-            a->size_ += buf_size;
-        }
-        a->num_++;
-
-        // free pointer memory
-        free(input_buffer_->perm_);
-
-        // clear buffer and shallow copy aux into buffer
-        // aux is on stack and will be destroyed
-
-        input_buffer_->deallocate();
-        input_buffer_->lists_ = aux.lists_;
-        aux.clear();
-        checkSerializationIntegrity();
-        return true;
-    }
-
-    bool Node::mergeBuffer() {
-        std::priority_queue<Node::MergeElement,
-                std::vector<Node::MergeElement>,
-                MergeComparator> queue;
-
-        if (input_buffer_->lists_.size() == 1 || input_buffer_->empty())
-            return true;
-
-        checkSerializationIntegrity();
-        // initialize aux buffer
-        Buffer aux;
-        Buffer::List* a;
-        if (input_buffer_->numElements() < MAX_ELS_PER_BUFFER)
-            a = aux.addList();
-        else
-            a = aux.addList(/*large buffer=*/true);
-
-        // Load each of the list heads into the priority queue
-        // keep track of offsets for possible deserialization
-        for (uint32_t i = 0; i < input_buffer_->lists_.size(); ++i) {
-            if (input_buffer_->lists_[i]->num_ > 0) {
-                Node::MergeElement* mge = new Node::MergeElement(
-                        input_buffer_->lists_[i]);
-                queue.push(*mge);
-            }
-        }
-
-        while (!queue.empty()) {
-            Node::MergeElement n = queue.top();
-            queue.pop();
-
-            // copy hash values
-            a->hashes_[a->num_] = n.hash();
-            uint32_t buf_size = n.size();
-            a->sizes_[a->num_] = buf_size;
-            // memset(a->data_ + a->size_, 0, buf_size);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(n.data()), buf_size);
-            a->size_ += buf_size;
-            a->num_++;
-/*
-            if (a->num_ >= MAX_ELS_PER_BUFFER) {
-                fprintf(stderr, "Num elements: %u\n", a->num_);
-                assert(false);
-            }
-*/
-            // increment n pointer and re-insert n into prioQ
-            if (n.next())
-                queue.push(n);
-        }
-
-        // clear buffer and copy over aux.
-        // aux itself is on the stack and will be destroyed
-        input_buffer_->deallocate();
-        input_buffer_->lists_ = aux.lists_;
-        aux.clear();
-        checkSerializationIntegrity();
-
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d merged; new size: %d\n", id(),
-                input_buffer_->numElements());
-#endif  // CT_NODE_DEBUG
-
-        return true;
-    }
-
-    bool Node::aggregateMergedBuffer() {
-        if (input_buffer_->empty())
-            return true;
-        // initialize aux buffer
-        Buffer aux;
-        Buffer::List* a;
-        if (input_buffer_->numElements() < MAX_ELS_PER_BUFFER)
-            a = aux.addList();
-        else
-            a = aux.addList(/*isLarge=*/true);
-
-        Buffer::List* l = input_buffer_->lists_[0];
-        uint32_t num = input_buffer_->numElements();
-        uint32_t numMerged = 0;
-        uint32_t offset = 0;
-
-        uint32_t lastIndex = 0;
-        offset += l->sizes_[0];
-        uint32_t lastOffset = 0;
-
-        // aggregate elements in buffer
-        for (uint32_t i = 1; i < num; ++i) {
-            if (l->hashes_[i] == l->hashes_[lastIndex]) {
-                if (numMerged == 0) {
-                    if (!(tree_->ops->deserialize(lastPAO,
-                            l->data_ + lastOffset, l->sizes_[lastIndex]))) {
-                        fprintf(stderr, "Can't deserialize at %u, index: %u\n",
-                                lastOffset, lastIndex);
-                        assert(false);
-                    }
-                }
-                if (!(tree_->ops->deserialize(thisPAO, l->data_ + offset,
-                        l->sizes_[i]))) {
-                    fprintf(stderr, "Can't deserialize at %u, index: %u\n",
-                            offset, i);
-                    assert(false);
-                }
-                if (tree_->ops->sameKey(thisPAO, lastPAO)) {
-                    tree_->ops->merge(lastPAO, thisPAO);
-#ifdef ENABLE_COUNTERS
-                    tree_->monitor_->numElements--;
-                    tree_->monitor_->numMerged++;
-#endif
-                    numMerged++;
-                    offset += l->sizes_[i];
-                    continue;
-                }
-            }
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            if (numMerged == 0) {
-                uint32_t buf_size = l->sizes_[lastIndex];
-                a->sizes_[a->num_] = l->sizes_[lastIndex];
-                // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-                memmove(a->data_ + a->size_,
-                        reinterpret_cast<void*>(l->data_ + lastOffset),
-                        l->sizes_[lastIndex]);
-                a->size_ += buf_size;
-            } else {
-                uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-                tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-                a->sizes_[a->num_] = buf_size;
-                a->size_ += buf_size;
-            }
-            a->num_++;
-            numMerged = 0;
-            lastIndex = i;
-            lastOffset = offset;
-            offset += l->sizes_[i];
-        }
-        // copy last PAO
-        a->hashes_[a->num_] = l->hashes_[lastIndex];
-        if (numMerged == 0) {
-            uint32_t buf_size = l->sizes_[lastIndex];
-            a->sizes_[a->num_] = l->sizes_[lastIndex];
-            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(l->data_ + lastOffset),
-                    l->sizes_[lastIndex]);
-            a->size_ += buf_size;
-        } else {
-            uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-            tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-            a->sizes_[a->num_] = buf_size;
-            a->size_ += buf_size;
-        }
-        a->num_++;
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
-                input_buffer_->numElements(), aux.numElements());
-#endif
-
-        // clear buffer and copy over aux.
-        // aux itself is on the stack and will be destroyed
-        input_buffer_->deallocate();
-        input_buffer_->lists_ = aux.lists_;
-        aux.clear();
-        return true;
-    }
-
     /* A leaf is split by moving half the elements of the buffer into a
      * new leaf and inserting a median value as the separator element into the
      * parent */
     Node* Node::splitLeaf() {
         checkIntegrity();
+        Buffer* buffer;
+        if (isRoot())
+            buffer = input_buffer_;
+        else
+            buffer = empty_buffer_;
 
         // select splitting index
-        uint32_t num = input_buffer_->numElements();
+        uint32_t num = buffer->numElements();
         uint32_t splitIndex = num/2;
-        Buffer::List* l = input_buffer_->lists_[0];
+        Buffer::List* l = buffer->lists_[0];
         while (l->hashes_[splitIndex] == l->hashes_[splitIndex-1]) {
             splitIndex++;
 #ifdef ENABLE_ASSERT_CHECKS
@@ -546,8 +303,8 @@ namespace cbt {
         copyIntoBuffer(l, 0, splitIndex);
         separator_ = l->hashes_[splitIndex];
         // delete the old list
-        input_buffer_->delList(0);
-        l = input_buffer_->lists_[0];
+        buffer->delList(0);
+        l = buffer->lists_[0];
 
         // check integrity of both leaves
         newLeaf->checkIntegrity();
@@ -561,7 +318,7 @@ namespace cbt {
 
         // if leaf is also the root, create new root
         if (isRoot()) {
-            input_buffer_->setEgressible(true);
+            buffer->setEgressible(true);
             tree_->createNewRoot(newLeaf);
         } else {
             parent_->addChild(newLeaf);
@@ -608,6 +365,34 @@ namespace cbt {
         return true;
     }
 
+    void Node::switchBuffers() {
+        // check if the other buffer is available for insertion (or if it's
+        // still being emptied). If available, switch buffers and set as
+        // unavailable; this will be reset by the emptying thread. If not, then
+        // set both buffers as full. This prevents the parent from emptying;
+        // this is also reset by the emptying threads.
+        if (empty_buffer_->available_for_insertion()) {
+            Buffer* temp = input_buffer_;
+            input_buffer_ = empty_buffer_;
+            empty_buffer_ = temp;        
+        } else {
+            set_both_buffers_full(true);
+        }
+    }
+
+    bool Node::both_buffers_full() {
+        pthread_spin_lock(&buffer_availability_lock_);
+        bool ret = both_buffers_full_;
+        pthread_spin_unlock(&buffer_availability_lock_);
+        return ret;
+    }
+
+    void Node::set_both_buffers_full(bool both_full) {
+        pthread_spin_lock(&buffer_availability_lock_);
+        both_buffers_full_ = both_full;
+        pthread_spin_unlock(&buffer_availability_lock_);
+    }
+
     bool Node::addChild(Node* newNode) {
         uint32_t i;
         // insert separator value
@@ -637,7 +422,7 @@ namespace cbt {
     bool Node::splitNonLeaf() {
         // ensure node's buffer is empty
 #ifdef ENABLE_ASSERT_CHECKS
-        if (!input_buffer_->empty()) {
+        if (!empty_buffer_->empty()) {
             fprintf(stderr, "Node %d has non-empty buffer\n", id_);
             assert(false);
         }
@@ -692,17 +477,12 @@ namespace cbt {
 
         if (isRoot()) {
             input_buffer_->setEgressible(true);
-            input_buffer_->deallocate();
+            empty_buffer_->setEgressible(true);
+            empty_buffer_->deallocate();
             return tree_->createNewRoot(newNode);
         } else {
             return parent_->addChild(newNode);
         }
-    }
-
-    bool Node::isFull() const {
-        if (input_buffer_->numElements() > EMPTY_THRESHOLD)
-            return true;
-        return false;
     }
 
     uint32_t Node::level() const {
@@ -768,7 +548,10 @@ namespace cbt {
 
                     if (add) {
                         input_buffer_->setQueueStatus(act);
-                        tree_->compressor_->addNode(this);
+                        if (act == EGRESS)
+                            tree_->compressor_->addNode(this, INSERT_BUFFER);
+                        else if (act == INGRESS || act == INGRESS_ONLY)
+                            tree_->compressor_->addNode(this, EMPTY_BUFFER);
                         tree_->compressor_->wakeup();
                     }
                 }
@@ -777,7 +560,7 @@ namespace cbt {
                 {
                     input_buffer_->setQueueStatus(SORT);
                     // add node to merger
-                    tree_->sorter_->addNode(this);
+                    tree_->sorter_->addNode(this, INSERT_BUFFER);
                     tree_->sorter_->wakeup();
                 }
                 break;
@@ -785,7 +568,7 @@ namespace cbt {
                 {
                     input_buffer_->setQueueStatus(MERGE);
                     // add node to merger
-                    tree_->merger_->addNode(this);
+                    tree_->merger_->addNode(this, EMPTY_BUFFER);
                     tree_->merger_->wakeup();
                 }
                 break;
@@ -793,7 +576,7 @@ namespace cbt {
                 {
                     input_buffer_->setQueueStatus(act);
                     // add node to empty
-                    tree_->emptier_->addNode(this);
+                    tree_->emptier_->addNode(this, EMPTY_BUFFER);
                     tree_->emptier_->wakeup();
                 }
                 break;
@@ -890,25 +673,25 @@ namespace cbt {
         }
     }
 
-    void Node::perform() {
-        Action act = input_buffer_->getQueueStatus();
+    void Node::perform(BufferType type) {
+        Action act = buffer(type)->getQueueStatus();
         switch (act) {
             case EGRESS:
             case INGRESS:
             case INGRESS_ONLY:
                 {
                     if (act == EGRESS) {
-                        input_buffer_->egress();
+                        buffer(type)->egress();
                     } else if (act == INGRESS || act == INGRESS_ONLY) {
-                        input_buffer_->ingress();
+                        buffer(type)->ingress();
                     }
                 }
                 break;
             case SORT:
                 {
                     if (isRoot()) {
-                        sortBuffer();
-                        aggregateSortedBuffer();
+                        buffer(type)->sort();
+                        buffer(type)->aggregate(/*isRoot=*/true);
                     } else {
                         assert(false && "Only the root buffer is sorted");
                     }
@@ -917,8 +700,8 @@ namespace cbt {
             case MERGE:
                 {
                     if (!isRoot()) {
-                        mergeBuffer();
-                        aggregateMergedBuffer();
+                        buffer(type)->merge();
+                        buffer(type)->aggregate(/*isRoot=*/false);
                     } else {
                         assert(false && "root buffer never sorted");
                     }
@@ -932,7 +715,16 @@ namespace cbt {
                         tree_->handleFullLeaves();
                     // if it is a leaf, it might be queued for compression
                     if (!isLeaf())
-                        input_buffer_->setQueueStatus(NONE);
+                        empty_buffer_->setQueueStatus(NONE);
+
+                    // if both buffers are full, we pick up the other node for
+                    // emptying
+                    if (both_buffers_full()) {
+                        switchBuffers();
+                        set_both_buffers_full(false);
+                        spillBuffer();
+                    }
+
                     if (rootFlag) {
                         tree_->sorter_->submitNextNodeForEmptying();
                     }

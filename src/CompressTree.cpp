@@ -44,7 +44,7 @@ namespace cbt {
             a_(a),
             b_(b),
             nodeCtr(1),
-            ops(ops),
+            ops_(ops),
             alg_(SNAPPY),
             allFlush_(true),
             lastLeafRead_(0),
@@ -83,7 +83,7 @@ namespace cbt {
         }
         for (uint64_t i = 0; i < num; ++i) {
             PartialAgg* agg = paos[i];
-            if (inputNode_->isFull()) {
+            if (inputNode_->input_buffer_->full()) {
                 // add inputNode_ to be sorted
                 inputNode_->schedule(SORT);
 
@@ -140,10 +140,10 @@ namespace cbt {
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->input_buffer_->lists_[0];
         hash = reinterpret_cast<void*>(&l->hashes_[lastElement_]);
-        ops->createPAO(NULL, &agg);
+        ops_->createPAO(NULL, &agg);
 //        if (lastLeafRead_ == 0)
 //            fprintf(stderr, "%ld\n", lastOffset_);
-        if (!(ops->deserialize(agg, l->data_ + lastOffset_,
+        if (!(ops_->deserialize(agg, l->data_ + lastOffset_,
                 l->sizes_[lastElement_]))) {
             fprintf(stderr, "Can't deserialize at %u, index: %u\n", lastOffset_,
                     lastElement_);
@@ -277,10 +277,10 @@ namespace cbt {
             Node* newLeaf = node->splitLeaf();
 
             Node *l1 = NULL, *l2 = NULL;
-            if (node->isFull()) {
+            if (node->empty_buffer_->full()) {
                 l1 = node->splitLeaf();
             }
-            if (newLeaf && newLeaf->isFull()) {
+            if (newLeaf && newLeaf->empty_buffer_->full()) {
                 l2 = newLeaf->splitLeaf();
             }
             node->schedule(EGRESS);
