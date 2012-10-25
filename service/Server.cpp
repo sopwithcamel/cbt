@@ -32,7 +32,7 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <zmq.hpp>
-#include "zhelpers.hpp"
+#include "zmq_helpers.hpp"
 #include <string>
 #include <iostream>
 

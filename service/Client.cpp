@@ -26,8 +26,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <gflags/gflags.h>
 #include <zmq.hpp>
-#include "zhelpers.hpp"
+#include "zmq_helpers.hpp"
 #include <string>
 #include <iostream>
 
@@ -37,6 +38,9 @@
 #include "ProtobufPartialAgg.h"
 
 using namespace google::protobuf::io;
+
+DEFINE_uint64(unique, 0, "Number of unique keys");
+DEFINE_int32(length, 0, "Key length");
 
 namespace cbtservice {
 
@@ -159,8 +163,8 @@ namespace cbtservice {
         
 //        std::cout << "Wrote " << paos.size() << " PAOs" << std::endl;
         for ( ; it != paos.end(); ++it) {
-            bool ret = static_cast<ProtobufOperations*>(to_)->serialize(
-                    static_cast<PartialAgg*>(*it), cs);
+            assert(static_cast<ProtobufOperations*>(to_)->serialize(
+                    static_cast<PartialAgg*>(*it), cs));
         }
     }
 
@@ -173,17 +177,22 @@ namespace cbtservice {
 } // cbtservice
 
 
-#define USAGE "%s <Number of unique keys> <Length of a key>\n"
 
 int main (int argc, char* argv[])
 {
-    if (argc < 3) {
-        fprintf(stdout, USAGE, argv[0]);
+    // Define gflags options
+    google::ParseCommandLineFlags(&argc, &argv, true);
+    string usage("Usage:\n");
+    usage += argv[0] + std::string(" --unique <u> --length <l>");
+    google::SetUsageMessage(usage);
+
+    if (!FLAGS_unique || !FLAGS_length) {
+        google::ShowUsageWithFlags(argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    uint32_t uniq = atoi(argv[1]);
-    uint32_t len = atoi(argv[2]);
+    uint32_t uniq = FLAGS_unique;
+    uint32_t len = FLAGS_length;
 
     cbtservice::CBTClient* client = new cbtservice::CBTClient(uniq, len);
     client->Run();

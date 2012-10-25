@@ -38,7 +38,7 @@ testapp = env.Program('test/testcbt', test_files,
 
 client_files = ['service/Client.cpp', env.Object('common/PartialAgg.cpp'), env.Object('util/HashUtil.cpp')]
 client_app = env.Program('service/cbtclient', client_files,
-            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-ldl'])
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-ldl', '-lgflags'])
 
 server_files = ['service/Server.cpp', env.Object('common/PartialAgg.cpp')]
 server_app = env.Program('service/cbtserver', server_files,
