@@ -36,26 +36,24 @@
 #include "HashUtil.h"
 #include "PartialAgg.h"
 #include "ProtobufPartialAgg.h"
+#include "Zipf.h"
 
 using namespace google::protobuf::io;
 
 DEFINE_uint64(unique, 0, "Number of unique keys");
 DEFINE_int32(length, 0, "Key length");
+DEFINE_bool(powerlaw, false, "Use power-law input distribution");
 
 namespace cbtservice {
 
-    CBTClient::CBTClient(uint32_t u, uint32_t l) :
+    CBTClient::CBTClient(uint32_t u, uint32_t l, InputDistribution d) :
             kNumUniqKeys(u),
             kKeyLen(l),
+            kInputDist(d),
             kNumFillers(10000),
             kLettersInAlphabet(26),
             kMaxPAOs(200000) {
-        num_full_loops_ = (int)floor(Conv26(log2(kNumUniqKeys)));
-        part_loop_ = (int)ceil(kNumUniqKeys / pow(26, num_full_loops_));
-
         assert(LinkUserMap());
-
-        GenerateFillers(kKeyLen - num_full_loops_ - 1);
     }
 
     CBTClient::~CBTClient() {
@@ -109,6 +107,26 @@ namespace cbtservice {
 
     void CBTClient::GeneratePAOs(std::vector<PartialAgg*>& paos,
             uint32_t number_of_paos) {
+        switch(kInputDist) {
+            case UNIFORM:
+                GenerateUniformPAOs(paos, number_of_paos);
+                break;
+            case POWERLAW:
+                GeneratePowerLawPAOs(paos, number_of_paos);
+                break;
+        }
+    }
+
+    void CBTClient::GenerateUniformPAOs(
+            std::vector<PartialAgg*>& paos, uint32_t number_of_paos) {
+
+        uint32_t num_full_loops_ =
+                (int)floor(Conv26(log2(kNumUniqKeys)));
+        uint32_t part_loop_ = (int)ceil(kNumUniqKeys /
+                pow(26, num_full_loops_));
+
+        GenerateFillers(kKeyLen - num_full_loops_ - 1);
+
         char* word = new char[kKeyLen + 1];
         assert(number_of_paos < kMaxPAOs);
         Token t;
@@ -116,6 +134,44 @@ namespace cbtservice {
             for (uint32_t j=0; j < num_full_loops_; j++)
                 word[j] = 97 + rand() % kLettersInAlphabet;
             word[num_full_loops_] = 97 + rand() % part_loop_;
+            word[num_full_loops_ + 1] = '\0';
+
+            uint32_t filler_number = HashUtil::MurmurHash(word,
+                    strlen(word), 42) % kNumFillers;
+//            fprintf(stderr, "%d, %s\n", filler_number, fillers_[filler_number]);
+
+            strncat(word, fillers_[filler_number], kKeyLen -
+                    num_full_loops_ - 1);
+
+            t.tokens.push_back(word);
+            PartialAgg* agg;
+            // TODO: Fix foolishness
+            to_->createPAO(NULL, &agg);
+            to_->createPAO(&t, &agg);
+            paos.push_back(agg);
+            t.clear();
+        }
+        delete[] word;
+    }
+
+    void CBTClient::GeneratePowerLawPAOs(std::vector<PartialAgg*>& paos,
+                uint32_t number_of_paos) {
+        ZipfGenerator zg(20, 26);
+
+        uint32_t num_full_loops_ =
+                (int)floor(Conv26(log2(kNumUniqKeys)));
+        uint32_t part_loop_ = (int)ceil(kNumUniqKeys /
+                pow(26, num_full_loops_));
+
+        GenerateFillers(kKeyLen - num_full_loops_ - 1);
+
+        char* word = new char[kKeyLen + 1];
+        assert(number_of_paos < kMaxPAOs);
+        Token t;
+        for (uint32_t i = 0; i < number_of_paos; ++i) {
+            for (uint32_t j=0; j < num_full_loops_; j++)
+                word[j] = 97 + zg();
+            word[num_full_loops_] = 97 + zg() % part_loop_;
             word[num_full_loops_ + 1] = '\0';
 
             uint32_t filler_number = HashUtil::MurmurHash(word,
@@ -193,8 +249,13 @@ int main (int argc, char* argv[])
 
     uint32_t uniq = FLAGS_unique;
     uint32_t len = FLAGS_length;
+    cbtservice::InputDistribution dist = cbtservice::UNIFORM;
 
-    cbtservice::CBTClient* client = new cbtservice::CBTClient(uniq, len);
+    if (FLAGS_powerlaw) {
+        dist = cbtservice::POWERLAW;
+    }
+
+    cbtservice::CBTClient* client = new cbtservice::CBTClient(uniq, len, dist);
     client->Run();
     return 0;
 }

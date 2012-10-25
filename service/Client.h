@@ -33,9 +33,14 @@
 
 namespace cbtservice {
 
+    typedef enum {
+        POWERLAW,
+        UNIFORM,
+    } InputDistribution;
+
     class CBTClient {
       public:
-        CBTClient(uint32_t u, uint32_t l);
+        CBTClient(uint32_t u, uint32_t l, InputDistribution d);
         ~CBTClient();
         void Run();
 
@@ -43,6 +48,7 @@ namespace cbtservice {
         // dataset properties
         const uint32_t kNumUniqKeys;
         const uint32_t kKeyLen;
+        const InputDistribution kInputDist;
         const uint32_t kNumFillers;
         const uint32_t kLettersInAlphabet;
         const uint32_t kMaxPAOs;
@@ -52,7 +58,12 @@ namespace cbtservice {
         }
 
         void GenerateFillers(uint32_t filler_len);
-        void GeneratePAOs(std::vector<PartialAgg*>& paos, uint32_t number_of_paos);
+        void GeneratePAOs(std::vector<PartialAgg*>& paos,
+                uint32_t number_of_paos);
+        void GenerateUniformPAOs(std::vector<PartialAgg*>& paos,
+                uint32_t number_of_paos);
+        void GeneratePowerLawPAOs(std::vector<PartialAgg*>& paos,
+                uint32_t number_of_paos);
         bool LinkUserMap();
         void SerializePAOs(const std::vector<PartialAgg*>& paos,
                 google::protobuf::io::CodedOutputStream* cs);
@@ -62,8 +73,6 @@ namespace cbtservice {
 
         // dataset generation
         std::vector<char*> fillers_;
-        uint32_t num_full_loops_;
-        uint32_t part_loop_; 
     };
 } // cbtservice
 
