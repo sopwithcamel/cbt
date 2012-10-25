@@ -34,30 +34,33 @@
 
 namespace cbt {
     class Node;
-    struct NodeID {
-        uint32_t operator()(const Node* node) const {
-            return node->id();
-        }
-    };
-    struct NodeEqual {
-        bool operator()(const Node* lhs, const Node* rhs) const {
-            return (lhs->id() == rhs->id());
-        }
-    };
 
     typedef struct {
         Node* node;
         BufferType buffer_type;
         uint32_t prio; // node priority
     } NodeInfo;
+
+    struct NodeInfoID {
+        uint32_t operator()(const NodeInfo* nodeinfo) const {
+            return nodeinfo->node->id();
+        }
+    };
+
+    struct NodeInfoEqual {
+        bool operator()(const NodeInfo* lhs, const NodeInfo* rhs) const {
+            return (lhs->node->id() == rhs->node->id());
+        }
+    };
+
     struct NodeInfoCompare {
         bool operator()(const NodeInfo* lhs, const NodeInfo* rhs) const {
             return (lhs->prio < rhs->prio);
         }
     };
 
-    typedef std::tr1::unordered_map<Node*, std::set<uint32_t>*, NodeID,
-            NodeEqual> DisabledDAG;
+    typedef std::tr1::unordered_map<NodeInfo*, std::set<uint32_t>*,
+            NodeInfoID, NodeInfoEqual> DisabledDAG;
     typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
             NodeInfoCompare> EnabledPriorityQueue;
 
@@ -78,11 +81,17 @@ namespace cbt {
 
         // Insert element into queue. Returns true if the element is enabled to
         // empty immediately or false otherwise.
-        bool insert(Node* n) {
+        bool insert(Node* n, BufferType type) {
             // check if any of the node's children have both buffers full. If
             // so, we can't empty.
             bool canEmpty = true;
             uint32_t i, s = n->children_.size();
+
+            NodeInfo* ni = new NodeInfo();
+            ni->node = n;
+            ni->buffer_type = type;
+            ni->prio = n->level();
+
             std::set<uint32_t>* d = new std::set<uint32_t>();
             for (i = 0; i < s; ++i) {
                 if (n->children_[i]->both_buffers_full()) {
@@ -93,14 +102,9 @@ namespace cbt {
             //  If so, the node goes to the enabled queue
             if (canEmpty) {
                 delete d;
-    
-                NodeInfo* ni = new NodeInfo();
-                ni->node = n;
-                ni->buffer_type = EMPTY_BUFFER;
-                ni->prio = n->level();
                 enabNodes_.push(ni);
             } else { // disabled queue
-                disabNodes_[n] = d; 
+                disabNodes_[ni] = d; 
             }
             // There is no need to check if there is an active parent (which
             // needs to be disabled). This is because at the time the parent
@@ -113,14 +117,12 @@ namespace cbt {
 
         // Returns an enabled with maximum priority or NULL if the queue is
         // empty
-        Node* pop() {
+        NodeInfo* pop() {
             if (enabNodes_.empty())
                 return NULL;
             NodeInfo* ret = enabNodes_.top();
             enabNodes_.pop();
-            Node* ret_node = ret->node;
-            delete ret;
-            return ret_node;
+            return ret;
         }
 
         void post(Node* n) {
@@ -128,7 +130,9 @@ namespace cbt {
             // If so, then remove n from the parent's dependency list
             if (n->parent_ && n->parent_->input_buffer_->getQueueStatus() ==
                     EMPTY) {
-                DisabledDAG::iterator parent_it = disabNodes_.find(n->parent_);
+                NodeInfo p;
+                p.node = n->parent_;
+                DisabledDAG::iterator parent_it = disabNodes_.find(&p);
                 if (parent_it != disabNodes_.end()) {
                     std::set<uint32_t>* ch = parent_it->second;
                     std::set<uint32_t>::iterator it = ch->find(n->id());
@@ -138,15 +142,10 @@ namespace cbt {
                     // if dependency list of parent is empty move parent to enabled
                     // queue
                     if (ch->empty()) {
-                        NodeInfo* np = new NodeInfo();
-                        np->node = n->parent_;
-                        np->buffer_type = EMPTY_BUFFER;
-                        np->prio = n->parent_->level();
+                        NodeInfo* np = parent_it->first;
                         enabNodes_.push(np);
-
                         delete ch;
-                        DisabledDAG::iterator t = disabNodes_.find(n->parent_);
-                        disabNodes_.erase(t); 
+                        disabNodes_.erase(parent_it); 
                     }
                 }
             }
@@ -172,11 +171,12 @@ namespace cbt {
             fprintf(stderr, ", DIS: ");
             for (DisabledDAG::iterator it = disabNodes_.begin();
                     it != disabNodes_.end(); ++it) {
-                if (it->first->isRoot()) {
-                    fprintf(stderr, "%d(%ld)*, ", it->first->id(),
+                Node* n = it->first->node;
+                if (n->isRoot()) {
+                    fprintf(stderr, "%d(%ld)*, ", n->id(),
                             it->second->size());
                 } else {
-                    fprintf(stderr, "%d(%ld), ", it->first->id(),
+                    fprintf(stderr, "%d(%ld), ", n->id(),
                             it->second->size());
                 }
             }

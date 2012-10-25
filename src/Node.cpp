@@ -329,7 +329,8 @@ namespace cbt {
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
             uint32_t num) {
         // check if the node is still queued up for a previous compression
-        wait(EGRESS);
+        // why do we need to wait?
+        //wait(EGRESS);
 
         // calculate offset
         uint32_t offset = 0;
@@ -528,37 +529,37 @@ namespace cbt {
     void Node::schedule(const Action& act) {
         switch(act) {
             case EGRESS:
-            case INGRESS:
             case INGRESS_ONLY:
                 {
-                    bool add;
                     if (!input_buffer_->egressible_) {
                         fprintf(stderr, "Node %d not xgressible\n", id_);
                         return;
                     }
-                    if (act == EGRESS) {
-                        // check if node has to be added on queue
-                        add = checkEgress();
-                    } else if (act == INGRESS || act == INGRESS_ONLY) {
-                        // check if node has to be added on queue
-                        add = checkIngress();
-                    } else {
-                        assert(false && "Invalid compress action");
+                    // check if node has to be added on queue
+                    if (checkEgress()) {
+                        buffer(INSERT_BUFFER)->setQueueStatus(act);
+                        tree_->compressor_->addNode(this, INSERT_BUFFER);
+                        tree_->compressor_->wakeup();
                     }
-
-                    if (add) {
-                        input_buffer_->setQueueStatus(act);
-                        if (act == EGRESS)
-                            tree_->compressor_->addNode(this, INSERT_BUFFER);
-                        else if (act == INGRESS || act == INGRESS_ONLY)
-                            tree_->compressor_->addNode(this, EMPTY_BUFFER);
+                }
+                break;
+            case INGRESS:
+                {
+                    if (!buffer(EMPTY_BUFFER)->egressible_) {
+                        fprintf(stderr, "Node %d not xgressible\n", id_);
+                        return;
+                    }
+                    // check if node has to be added on queue
+                    if (checkIngress()) {
+                        buffer(EMPTY_BUFFER)->setQueueStatus(act);
+                        tree_->compressor_->addNode(this, EMPTY_BUFFER);
                         tree_->compressor_->wakeup();
                     }
                 }
                 break;
             case SORT:
                 {
-                    input_buffer_->setQueueStatus(SORT);
+                    buffer(INSERT_BUFFER)->setQueueStatus(SORT);
                     // add node to merger
                     tree_->sorter_->addNode(this, INSERT_BUFFER);
                     tree_->sorter_->wakeup();
@@ -566,7 +567,7 @@ namespace cbt {
                 break;
             case MERGE:
                 {
-                    input_buffer_->setQueueStatus(MERGE);
+                    buffer(EMPTY_BUFFER)->setQueueStatus(MERGE);
                     // add node to merger
                     tree_->merger_->addNode(this, EMPTY_BUFFER);
                     tree_->merger_->wakeup();
@@ -574,9 +575,10 @@ namespace cbt {
                 break;
             case EMPTY:
                 {
-                    input_buffer_->setQueueStatus(act);
+                    BufferType t = (isRoot()? INSERT_BUFFER : EMPTY_BUFFER);
+                    buffer(t)->setQueueStatus(act);
                     // add node to empty
-                    tree_->emptier_->addNode(this, EMPTY_BUFFER);
+                    tree_->emptier_->addNode(this, t);
                     tree_->emptier_->wakeup();
                 }
                 break;
@@ -715,7 +717,7 @@ namespace cbt {
                         tree_->handleFullLeaves();
                     // if it is a leaf, it might be queued for compression
                     if (!isLeaf())
-                        empty_buffer_->setQueueStatus(NONE);
+                        buffer(type)->setQueueStatus(NONE);
 
                     // if both buffers are full, we pick up the other node for
                     // emptying

@@ -44,7 +44,7 @@ namespace cbt {
         explicit Slave(CompressTree* tree);
         virtual ~Slave() {}
         // Responsible for managing queueStatus
-        virtual void addNode(Node* node, BufferType type) = 0;
+        virtual void addNode(Node* node, BufferType type);
         // Returns true if there are no queued jobs and all threads are
         // sleeping; false otherwise
         virtual bool empty();
@@ -87,9 +87,8 @@ namespace cbt {
         // get next node from (default: head of) queue or NULL if empty
         virtual Node* getNextNode(BufferType& type);
 
-        // add node to (default: tail of) queue
-        virtual bool addNodeToQueue(Node* node, uint32_t priority,
-                BufferType type);
+        // add node to queue
+        virtual bool addNodeToQueue(NodeInfo* node);
 
         static void* callHelper(void* context);
         // the pthread execution function. It extracts Nodes added by
@@ -147,7 +146,6 @@ namespace cbt {
         explicit Sorter(CompressTree* tree);
         ~Sorter();
         void work(Node* n, BufferType type);
-        void addNode(Node* node, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;
@@ -203,7 +201,6 @@ namespace cbt {
         explicit Merger(CompressTree* tree);
         ~Merger();
         void work(Node* n, BufferType type);
-        void addNode(Node* node, BufferType type);
 
       protected:
         virtual std::string getSlaveName() const;
