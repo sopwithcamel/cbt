@@ -117,8 +117,8 @@ namespace cbt {
 
         // return value indicates whether the node needs to be added or
         // if it's already present in the queue
-        bool checkEgress();
-        bool checkIngress();
+        bool checkEgress(BufferType type);
+        bool checkIngress(BufferType type);
 
         //
         // management of queues
@@ -134,7 +134,7 @@ namespace cbt {
         // Signal that Action act is complete.
         void done(const Action& act);
         // 
-        void schedule(const Action& act);
+        void schedule(BufferType type, const Action& act);
 
         /* pointer to the tree */
         CompressTree* tree_;

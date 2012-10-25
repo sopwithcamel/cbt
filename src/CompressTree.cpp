@@ -85,7 +85,7 @@ namespace cbt {
             PartialAgg* agg = paos[i];
             if (inputNode_->input_buffer_->full()) {
                 // add inputNode_ to be sorted
-                inputNode_->schedule(SORT);
+                inputNode_->schedule(INSERT_BUFFER, SORT);
 
                 // get an empty root. This function can block until there are
                 // empty roots available
@@ -133,7 +133,7 @@ namespace cbt {
             Node* curLeaf = allLeaves_[0];
             while (curLeaf->input_buffer_->numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(INGRESS_ONLY);
+            curLeaf->schedule(INSERT_BUFFER, INGRESS_ONLY);
             curLeaf->wait(INGRESS_ONLY);
         }
 
@@ -153,7 +153,7 @@ namespace cbt {
         lastElement_++;
 
         if (lastElement_ >= curLeaf->input_buffer_->numElements()) {
-            curLeaf->schedule(EGRESS);
+            curLeaf->schedule(INSERT_BUFFER, EGRESS);
             if (++lastLeafRead_ == allLeaves_.size()) {
                 /* Wait for all outstanding compression work to finish */
                 compressor_->waitUntilCompletionNoticeReceived();
@@ -167,7 +167,7 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->input_buffer_->numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(INGRESS_ONLY);
+            n->schedule(INSERT_BUFFER, INGRESS_ONLY);
             n->wait(INGRESS_ONLY);
             lastOffset_ = 0;
             lastElement_ = 0;
@@ -214,7 +214,7 @@ namespace cbt {
         fprintf(stderr, "Starting to flush\n");
 
         emptyType_ = ALWAYS;
-        inputNode_->schedule(SORT);
+        inputNode_->schedule(INSERT_BUFFER, SORT);
 
         /* wait for all nodes to be sorted and emptied
            before proceeding */
@@ -283,15 +283,15 @@ namespace cbt {
             if (newLeaf && newLeaf->empty_buffer_->full()) {
                 l2 = newLeaf->splitLeaf();
             }
-            node->schedule(EGRESS);
+            node->schedule(EMPTY_BUFFER, EGRESS);
             if (newLeaf) {
-                newLeaf->schedule(EGRESS);
+                newLeaf->schedule(INSERT_BUFFER, EGRESS);
             }
             if (l1) {
-                l1->schedule(EGRESS);
+                l1->schedule(INSERT_BUFFER, EGRESS);
             }
             if (l2) {
-                l2->schedule(EGRESS);
+                l2->schedule(INSERT_BUFFER, EGRESS);
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
@@ -354,7 +354,7 @@ namespace cbt {
         Buffer temp;
         temp.lists_ = rootNode_->input_buffer_->lists_;
         rootNode_->input_buffer_->lists_ = n->input_buffer_->lists_;
-        rootNode_->schedule(EMPTY);
+        rootNode_->schedule(INSERT_BUFFER, EMPTY);
 
         n->input_buffer_->lists_ = temp.lists_;
         temp.clear();

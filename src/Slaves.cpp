@@ -445,7 +445,7 @@ namespace cbt {
 
         // schedule to sort
         if (act == INGRESS) {
-            n->schedule(MERGE);
+            n->schedule(EMPTY_BUFFER, MERGE);
         } else if (act == INGRESS_ONLY) {
             // no further work if we're only decompressing
             n->buffer(type)->setQueueStatus(NONE);
@@ -498,7 +498,7 @@ namespace cbt {
 #endif  // CT_NODE_DEBUG
         n->perform(type);
         // schedule for emptying
-        n->schedule(EMPTY);
+        n->schedule(EMPTY_BUFFER, EMPTY);
         // indicate that we're done sorting
         n->done(MERGE);
     }

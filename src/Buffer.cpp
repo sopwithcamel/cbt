@@ -689,11 +689,11 @@ namespace cbt {
                 out_list->state_ = List::OUT;
                 // clear ingressed so lists won't be deallocated on return
                 ingressed.clear();
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "ingressed node %d; n: %u\n", node_->id_,
-                        numElements());
-#endif  // CT_NODE_DEBUG
             } 
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "ingressed node %d; n: %u\n", node_->id_,
+                    numElements());
+#endif  // CT_NODE_DEBUG
 
             // set file pointer to beginning of file
             if (kPagingEnabled)

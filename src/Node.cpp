@@ -89,7 +89,7 @@ namespace cbt {
         const char* key = tree_->ops()->getKey(agg);
 
         // copy into Buffer fields
-        Buffer::List* l = input_buffer_->lists_[0];
+        Buffer::List* l = buffer(INSERT_BUFFER)->lists_[0];
         l->hashes_[l->num_] = HashUtil::MurmurHash(key, strlen(key), 42);
         l->sizes_[l->num_] = buf_size;
         // is this required?
@@ -118,17 +118,17 @@ namespace cbt {
 
     bool Node::emptyOrEgress() {
         bool ret = true;
-        if (tree_->emptyType_ == ALWAYS || input_buffer_->full()) {
+        if (tree_->emptyType_ == ALWAYS || buffer(INSERT_BUFFER)->full()) {
             switchBuffers();
             ret = spillBuffer();
         } else {
-            schedule(EGRESS);
+            schedule(INSERT_BUFFER, EGRESS);
         }
         return ret;
     }
 
     bool Node::spillBuffer() {
-        schedule(INGRESS);
+        schedule(EMPTY_BUFFER, INGRESS);
         return true;
     }
 
@@ -137,37 +137,37 @@ namespace cbt {
         uint32_t curElement = 0;
         uint32_t lastElement = 0;
 
-        Buffer* buffer;
+        Buffer* buf;
         if (isRoot())
-            buffer = input_buffer_;
+            buf = buffer(INSERT_BUFFER);
         else
-            buffer = empty_buffer_;
+            buf = buffer(EMPTY_BUFFER);
 
         /* if i am a leaf node, queue up for action later after all the
          * internal nodes have been processed */
         if (isLeaf()) {
             /* this may be called even when buffer is not full (when flushing
              * all buffers at the end). */
-            if (buffer->full() || isRoot()) {
+            if (buf->full() || isRoot()) {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
-                        %u/%u\n", id_, buffer->numElements(),
+                        %u/%u\n", id_, buf->numElements(),
                         EMPTY_THRESHOLD);
 #endif
             } else {  // compress
-                schedule(EGRESS);
+                schedule(EMPTY_BUFFER, EGRESS);
             }
             return true;
         }
 
-        if (buffer->empty()) {
+        if (buf->empty()) {
             for (curChild = 0; curChild < children_.size(); curChild++) {
                 children_[curChild]->emptyOrEgress();
             }
         } else {
             checkSerializationIntegrity();
-            Buffer::List* l = buffer->lists_[0];
+            Buffer::List* l = buf->lists_[0];
             // find the first separator strictly greater than the first element
             while (l->hashes_[curElement] >=
                     children_[curChild]->separator_) {
@@ -188,10 +188,10 @@ namespace cbt {
                 child: %d); first element: %u\n", id_, children_[curChild]->id_,
                     children_[curChild]->separator_, curChild, l->hashes_[0]);
 #endif
-            uint32_t num = buffer->numElements();
+            uint32_t num = buf->numElements();
 #ifdef ENABLE_ASSERT_CHECKS
             // there has to be a single list in the buffer at this point
-            assert(buffer->lists_.size() == 1);
+            assert(buf->lists_.size() == 1);
 #endif
             while (curElement < num) {
                 if (l->hashes_[curElement] >=
@@ -208,7 +208,8 @@ namespace cbt {
                                  list:%lu\n",
                                 curElement - lastElement,
                                 children_[curChild]->id_,
-                                children_[curChild]->input_buffer_->lists_.size()-1);
+                                children_[curChild]->buffer(
+                                INSERT_BUFFER)->lists_.size() - 1);
 #endif
                         lastElement = curElement;
                     }
@@ -241,7 +242,8 @@ namespace cbt {
                         list: %lu\n",
                         curElement - lastElement,
                         children_[curChild]->id_,
-                        children_[curChild]->input_buffer_->lists_.size()-1);
+                        children_[curChild]->buffer(
+                        INSERT_BUFFER)->lists_.size()-1);
 #endif
                 children_[curChild]->emptyOrEgress();
                 curChild++;
@@ -256,7 +258,7 @@ namespace cbt {
             l->setEmpty();
 
             if (!isRoot()) {
-                buffer->deallocate();
+                buf->deallocate();
             }
         }
         // Split leaves can cause the number of children to increase. Check.
@@ -376,8 +378,14 @@ namespace cbt {
             Buffer* temp = input_buffer_;
             input_buffer_ = empty_buffer_;
             empty_buffer_ = temp;        
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d: switched buffers\n", id_);
+#endif  // CT_NODE_DEBUG
         } else {
             set_both_buffers_full(true);
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "Node %d: both buffers full\n", id_);
+#endif  // CT_NODE_DEBUG
         }
     }
 
@@ -526,59 +534,68 @@ namespace cbt {
         }
     }
 
-    void Node::schedule(const Action& act) {
+    void Node::schedule(BufferType type, const Action& act) {
         switch(act) {
             case EGRESS:
-            case INGRESS_ONLY:
                 {
-                    if (!input_buffer_->egressible_) {
+                    if (!buffer(type)->egressible_) {
                         fprintf(stderr, "Node %d not xgressible\n", id_);
                         return;
                     }
                     // check if node has to be added on queue
-                    if (checkEgress()) {
-                        buffer(INSERT_BUFFER)->setQueueStatus(act);
-                        tree_->compressor_->addNode(this, INSERT_BUFFER);
+                    if (checkEgress(type)) {
+                        buffer(type)->setQueueStatus(act);
+                        tree_->compressor_->addNode(this, type);
                         tree_->compressor_->wakeup();
                     }
                 }
                 break;
+            case INGRESS_ONLY:
             case INGRESS:
                 {
-                    if (!buffer(EMPTY_BUFFER)->egressible_) {
+                    if (!buffer(type)->egressible_) {
                         fprintf(stderr, "Node %d not xgressible\n", id_);
                         return;
                     }
                     // check if node has to be added on queue
-                    if (checkIngress()) {
-                        buffer(EMPTY_BUFFER)->setQueueStatus(act);
-                        tree_->compressor_->addNode(this, EMPTY_BUFFER);
+                    if (checkIngress(type)) {
+                        buffer(type)->setQueueStatus(act);
+                        tree_->compressor_->addNode(this, type);
                         tree_->compressor_->wakeup();
                     }
                 }
                 break;
             case SORT:
                 {
-                    buffer(INSERT_BUFFER)->setQueueStatus(SORT);
+#ifdef ENABLE_ASSERT_CHECKS
+                    assert(type == INSERT_BUFFER);
+#endif  // ENABLE_ASSERT_CHECKS
+                    buffer(type)->setQueueStatus(SORT);
                     // add node to merger
-                    tree_->sorter_->addNode(this, INSERT_BUFFER);
+                    tree_->sorter_->addNode(this, type);
                     tree_->sorter_->wakeup();
                 }
                 break;
             case MERGE:
                 {
-                    buffer(EMPTY_BUFFER)->setQueueStatus(MERGE);
+#ifdef ENABLE_ASSERT_CHECKS
+                    assert(type == EMPTY_BUFFER);
+#endif  // ENABLE_ASSERT_CHECKS
+                    buffer(type)->setQueueStatus(MERGE);
                     // add node to merger
-                    tree_->merger_->addNode(this, EMPTY_BUFFER);
+                    tree_->merger_->addNode(this, type);
                     tree_->merger_->wakeup();
                 }
                 break;
             case EMPTY:
                 {
+#ifdef ENABLE_ASSERT_CHECKS
                     BufferType t = (isRoot()? INSERT_BUFFER : EMPTY_BUFFER);
-                    buffer(t)->setQueueStatus(act);
+                    assert(type == t);
+#endif  // ENABLE_ASSERT_CHECKS
+                    buffer(type)->setQueueStatus(act);
                     // add node to empty
-                    tree_->emptier_->addNode(this, t);
+                    tree_->emptier_->addNode(this, type);
                     tree_->emptier_->wakeup();
                 }
                 break;
@@ -590,12 +607,12 @@ namespace cbt {
         }
     }
 
-    bool Node::checkEgress() {
+    bool Node::checkEgress(BufferType type) {
         bool ret;
-        Action act = input_buffer_->getQueueStatus();
-        if (input_buffer_->empty()) {
+        Action act = buffer(type)->getQueueStatus();
+        if (buffer(type)->empty()) {
             // nothing to be done
-            input_buffer_->setQueueStatus(NONE);
+            buffer(type)->setQueueStatus(NONE);
             ret = false;
         } else if (act == INGRESS || act == INGRESS_ONLY) {
             // check if node already queued as INGRESS. This shouldn't
@@ -609,21 +626,21 @@ namespace cbt {
             ret = false;
         } else {
             // Node not present
-            input_buffer_->setQueueStatus(EGRESS);
+            buffer(type)->setQueueStatus(EGRESS);
             ret = true;
         }
         return ret;
     }
 
-    bool Node::checkIngress() {
+    bool Node::checkIngress(BufferType type) {
         bool ret;
-        Action act = input_buffer_->getQueueStatus();
-        if (input_buffer_->empty()) {
-            input_buffer_->setQueueStatus(NONE);
+        Action act = buffer(type)->getQueueStatus();
+        if (buffer(type)->empty()) {
+            buffer(type)->setQueueStatus(NONE);
             ret = false;
         } else if (act == EGRESS) {
             // check if compression request is outstanding and cancel this */
-            input_buffer_->setQueueStatus(act);
+            buffer(type)->setQueueStatus(act);
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d reset to decompress\n", id());
 #endif
@@ -633,7 +650,7 @@ namespace cbt {
             fprintf(stderr, "ingressing node %d twice", id());
             assert(false);
         } else { // NONE
-            input_buffer_->setQueueStatus(act);
+            buffer(type)->setQueueStatus(act);
             ret = true;
         }
         return ret;
