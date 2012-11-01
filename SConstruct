@@ -23,7 +23,7 @@ def Utility(target, source, action):
     env.Precious(target)
     return target
 
-src_files = [Glob('src/*.cpp'), Glob('util/*.cpp'), Glob('common/*.cpp')]
+src_files = [Glob('src/*.cpp'), Glob('util/*.cpp')]
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
 
@@ -36,11 +36,11 @@ test_files = ['test/test.pb.cc', 'test/testCBT.cpp']
 testapp = env.Program('test/testcbt', test_files,
             LIBS = ['-lgtest', '-lprotobuf', '-lpthread', '-lcbt', '-lsnappy'])
 
-client_files = ['service/Client.cpp', env.Object('common/PartialAgg.cpp'), env.Object('util/HashUtil.cpp')]
+client_files = ['service/Client.cpp', env.Object('util/HashUtil.cpp')]
 client_app = env.Program('service/cbtclient', client_files,
             LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-ldl', '-lgflags'])
 
-server_files = ['service/Server.cpp', env.Object('common/PartialAgg.cpp')]
+server_files = ['service/Server.cpp']
 server_app = env.Program('service/cbtserver', server_files,
             LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ljemalloc', '-ldl'])
 

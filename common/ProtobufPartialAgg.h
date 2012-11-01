@@ -11,6 +11,11 @@ class ProtobufOperations : public Operations {
 	virtual ~ProtobufOperations() {}
 
     SerializationMethod getSerializationMethod() const { return PROTOBUF; }
+    virtual void* getValue(PartialAgg* p) const {
+        return NULL;
+    }
+    virtual void setValue(PartialAgg* p, void* v) const {
+    }
 
 	/* serialize into file */
 	virtual bool serialize(PartialAgg* p,

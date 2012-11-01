@@ -40,10 +40,22 @@
 
 class Token {
   public:
-	Token();
-	~Token();
-	void init(const Token&);
-	void clear();
+	Token() {}
+	~Token() {}
+	void init(const Token& rhs) {
+        uint32_t i;
+        void* buf;
+        for (i=0; i<rhs.tokens.size(); i++) {
+            buf = malloc(rhs.token_sizes[i] + 1);
+            memcpy(buf, rhs.tokens[i], rhs.token_sizes[i]);
+            tokens.push_back(buf);
+            token_sizes.push_back(rhs.token_sizes[i]);
+        }
+    }
+	void clear() {
+        tokens.clear();
+        token_sizes.clear();
+    }
 	std::vector<void*> tokens;
 	std::vector<size_t> token_sizes;
 };
@@ -51,8 +63,8 @@ class Token {
 class PartialAgg {
   protected:
     /* don't allow PartialAgg objects to be created */
-    PartialAgg();
-    ~PartialAgg();
+    PartialAgg() {}
+    ~PartialAgg() {}
 };
 
 class Operations {
@@ -65,8 +77,8 @@ class Operations {
         BOOST,
         HAND
     };
-    Operations();
-    virtual ~Operations() = 0;
+    Operations() {}
+    virtual ~Operations() {}
     virtual const char* getKey(PartialAgg* p) const = 0;
     virtual bool setKey(PartialAgg* p, char* k) const = 0;
     virtual void* getValue(PartialAgg* p) const = 0;
