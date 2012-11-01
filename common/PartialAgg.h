@@ -69,6 +69,8 @@ class Operations {
     virtual ~Operations() = 0;
     virtual const char* getKey(PartialAgg* p) const = 0;
     virtual bool setKey(PartialAgg* p, char* k) const = 0;
+    virtual void* getValue(PartialAgg* p) const = 0;
+    virtual void setValue(PartialAgg* p, void* v) const = 0;
     virtual bool sameKey(PartialAgg* p1, PartialAgg* p2) const = 0;
     virtual size_t createPAO(Token* t, PartialAgg** p_list) const = 0;
     virtual size_t dividePAO(const PartialAgg& p,
