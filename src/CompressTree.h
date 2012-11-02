@@ -127,27 +127,12 @@ namespace cbt {
         bool threadsStarted_;
         pthread_barrier_t threadsBarrier_;
 
-        /* Eviction-related */
-        uint32_t nodesInMemory_;
-        uint32_t numEvicted_;
-        char* evictedBuffer_;
-        uint32_t evictedBufferOffset_;
-        pthread_mutex_t evictedBufferMutex_;
-
-        /* Members for async-emptying */
         Emptier* emptier_;
-
-        /* Sorting-related */
         Sorter* sorter_;
-
-        /* Members for async-sorting */
         Merger* merger_;
-
-        /* Compression-related */
         Compressor* compressor_;
 
 #ifdef ENABLE_PAGING
-        /* Paging */
         Pager* pager_;
 #endif
 

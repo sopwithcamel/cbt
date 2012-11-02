@@ -50,9 +50,7 @@ namespace cbt {
             lastLeafRead_(0),
             lastOffset_(0),
             lastElement_(0),
-            threadsStarted_(false),
-            nodesInMemory_(nodesInMemory),
-            numEvicted_(0) {
+            threadsStarted_(false) {
         BUFFER_SIZE = buffer_size;
         MAX_ELS_PER_BUFFER = BUFFER_SIZE / pao_size;
         EMPTY_THRESHOLD = MAX_ELS_PER_BUFFER >> 1;
@@ -131,6 +129,7 @@ namespace cbt {
 
             // page in and decompress first leaf
             Node* curLeaf = allLeaves_[0];
+            assert(curLeaf->buffer_.lists_.size() == 1);
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
             curLeaf->schedule(DECOMPRESS_ONLY);
@@ -219,6 +218,7 @@ namespace cbt {
         /* wait for all nodes to be sorted and emptied
            before proceeding */
         do {
+            sorter_->waitUntilCompletionNoticeReceived();
             merger_->waitUntilCompletionNoticeReceived();
             emptier_->waitUntilCompletionNoticeReceived();
             compressor_->waitUntilCompletionNoticeReceived();
