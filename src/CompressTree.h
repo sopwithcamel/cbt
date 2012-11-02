@@ -134,7 +134,6 @@ namespace cbt {
 #ifdef ENABLE_PAGING
         Pager* pager_;
 #endif
-
 #ifdef ENABLE_COUNTERS
         Monitor* monitor_;
 #endif

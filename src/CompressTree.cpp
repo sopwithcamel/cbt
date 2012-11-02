@@ -59,6 +59,7 @@ namespace cbt {
 
         pthread_mutex_init(&emptyRootNodesMutex_, NULL);
 
+        Slave::initSleepSemaphore();        
 #ifdef ENABLE_COUNTERS
         monitor_ = NULL;
 #endif
@@ -123,8 +124,6 @@ namespace cbt {
             lastOffset_ = 0;
             lastElement_ = 0;
 
-            /* Wait for all outstanding compression work to finish */
-            compressor_->waitUntilCompletionNoticeReceived();
             allFlush_ = true;
 
             // page in and decompress first leaf
@@ -154,8 +153,6 @@ namespace cbt {
         if (lastElement_ >= curLeaf->buffer_.numElements()) {
             curLeaf->schedule(COMPRESS);
             if (++lastLeafRead_ == allLeaves_.size()) {
-                /* Wait for all outstanding compression work to finish */
-                compressor_->waitUntilCompletionNoticeReceived();
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Emptying tree!\n");
 #endif
@@ -215,19 +212,11 @@ namespace cbt {
         emptyType_ = ALWAYS;
         inputNode_->schedule(SORT);
 
-        /* wait for all nodes to be sorted and emptied
-           before proceeding */
+        int all_done;
         do {
-            sorter_->waitUntilCompletionNoticeReceived();
-            merger_->waitUntilCompletionNoticeReceived();
-            emptier_->waitUntilCompletionNoticeReceived();
-            compressor_->waitUntilCompletionNoticeReceived();
-#ifdef ENABLE_PAGING
-            pager_->waitUntilCompletionNoticeReceived();
-#endif
-        } while (!merger_->empty() ||
-                !emptier_->empty() ||
-                !compressor_->empty());
+            usleep(100);
+            all_done = Slave::readSleepSemaphore();
+        } while (all_done);
 
         // add all leaves;
         visitQueue.push_back(rootNode_);
@@ -397,7 +386,7 @@ namespace cbt {
         emptyType_ = IF_FULL;
 
         uint32_t mergerThreadCount = 4;
-        uint32_t compressorThreadCount = 3;
+        uint32_t compressorThreadCount = 4;
         uint32_t emptierThreadCount = 4;
         uint32_t sorterThreadCount = 1;
 

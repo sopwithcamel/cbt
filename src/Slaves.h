@@ -23,6 +23,7 @@
 
 #ifndef SRC_SLAVES_H_
 #define SRC_SLAVES_H_
+#include <semaphore.h>
 #include <stdint.h>
 #include <deque>
 #include <string>
@@ -51,11 +52,12 @@ namespace cbt {
         // Returns true if there are queued jobs; false otherwise
         virtual bool more();
         virtual void wakeup();
-        virtual void waitUntilCompletionNoticeReceived();
 
         void startThreads(uint32_t num = 1);
         void stopThreads();
 
+        static void initSleepSemaphore();
+        static int readSleepSemaphore();
       protected:
         class ThreadStruct {
           public:
@@ -96,19 +98,15 @@ namespace cbt {
         // functions can be specialized
         virtual void slaveRoutine(ThreadStruct* t);
 
-        // check if someone has requested a completion signal.
-        // completion is defined as all threads being asleep
-        // and the queue being empty. This is requested only when
-        // the insertion thread completes input and blocks waiting
-        // for all Slaves to finish.
-        virtual void checkSendCompletionNotice();
         virtual void setInputComplete(bool value);
         bool checkInputComplete();
         virtual void work(Node* n) = 0;
 
         // Thread-mask related functions
         void setThreadSleep(uint32_t index);
+        // to be called only when holding maskLock_
         uint32_t getNumberOfSleepingThreads();
+        bool allAsleep();
 
 #ifdef CT_NODE_DEBUG
         // Debugging
@@ -116,6 +114,7 @@ namespace cbt {
         virtual void printElements();
 #endif  // CT_NODE_DEBUG
 
+        static sem_t sleepSemaphore_;
         CompressTree* const tree_;
 
         pthread_mutex_t completionMutex_;
