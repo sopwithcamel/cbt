@@ -115,6 +115,7 @@ namespace cbt {
         pthread_cond_t emptyRootAvailable_;
 
         bool allFlush_;
+        bool empty_;
         EmptyType emptyType_;
         std::deque<Node*> leavesToBeEmptied_;
         std::vector<Node*> allLeaves_;

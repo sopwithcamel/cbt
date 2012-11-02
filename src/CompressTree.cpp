@@ -47,6 +47,7 @@ namespace cbt {
             ops(ops),
             alg_(SNAPPY),
             allFlush_(true),
+            empty_(true),
             lastLeafRead_(0),
             lastOffset_(0),
             lastElement_(0),
@@ -76,7 +77,7 @@ namespace cbt {
         // copy buf into root node buffer
         // root node buffer always decompressed
         if (num > 0)
-            allFlush_ = false;
+            allFlush_ = empty_ = false;
         if (!threadsStarted_) {
             startThreads();
         }
@@ -134,6 +135,8 @@ namespace cbt {
             curLeaf->schedule(DECOMPRESS_ONLY);
             curLeaf->wait(DECOMPRESS_ONLY);
         }
+        if (empty_)
+            return false;
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->buffer_.lists_[0];
@@ -156,6 +159,12 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Emptying tree!\n");
 #endif
+                // Again wait for all to end
+                int all_done;
+                do {
+                    usleep(100);
+                    all_done = Slave::readSleepSemaphore();
+                } while (all_done);
                 emptyTree();
                 stopThreads();
                 return false;
@@ -196,7 +205,7 @@ namespace cbt {
         }
         allLeaves_.clear();
         leavesToBeEmptied_.clear();
-        allFlush_ = true;
+        allFlush_ = empty_ = true;
         lastLeafRead_ = 0;
         lastOffset_ = 0;
         lastElement_ = 0;
