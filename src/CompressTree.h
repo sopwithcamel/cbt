@@ -112,7 +112,6 @@ namespace cbt {
 
         std::deque<Node*> emptyRootNodes_;
         pthread_mutex_t emptyRootNodesMutex_;
-
         pthread_cond_t emptyRootAvailable_;
 
         bool allFlush_;
@@ -137,7 +136,6 @@ namespace cbt {
 #endif
 
 #ifdef ENABLE_COUNTERS
-        /* Monitor */
         Monitor* monitor_;
 #endif
     };
