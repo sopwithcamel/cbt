@@ -27,7 +27,7 @@ src_files = [Glob('src/*.cpp'), Glob('util/*.cpp')]
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
 
-env.Append(CCFLAGS = ['-g','-O2','-Wall'],
+env.Append(CCFLAGS = ['-g', '-O3', '-Wall'],
             CPPFLAGS = ['-Isrc/', '-Iutil/', '-Icommon'])
 cbtlib = env.SharedLibrary('cbt', src_files,
             LIBS = ['-ljemalloc'])
