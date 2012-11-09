@@ -60,7 +60,12 @@ namespace cbt {
 
         pthread_mutex_init(&emptyRootNodesMutex_, NULL);
 
-        Slave::initSleepSemaphore();        
+#ifdef ENABLE_PAGING
+        sem_init(&sleepSemaphore_, 0, 5);
+#else
+        sem_init(&sleepSemaphore_, 0, 4);
+#endif
+
 #ifdef ENABLE_COUNTERS
         monitor_ = NULL;
 #endif
@@ -163,7 +168,7 @@ namespace cbt {
                 int all_done;
                 do {
                     usleep(100);
-                    all_done = Slave::readSleepSemaphore();
+                    sem_getvalue(&sleepSemaphore_, &all_done);
                 } while (all_done);
                 emptyTree();
                 stopThreads();
@@ -224,7 +229,7 @@ namespace cbt {
         int all_done;
         do {
             usleep(100);
-            all_done = Slave::readSleepSemaphore();
+            sem_getvalue(&sleepSemaphore_, &all_done);
         } while (all_done);
 
         // add all leaves;
@@ -397,7 +402,7 @@ namespace cbt {
         uint32_t mergerThreadCount = 4;
         uint32_t compressorThreadCount = 4;
         uint32_t emptierThreadCount = 4;
-        uint32_t sorterThreadCount = 1;
+        uint32_t sorterThreadCount = 4;
 
         // One for the inserter
         uint32_t threadCount = mergerThreadCount + compressorThreadCount +

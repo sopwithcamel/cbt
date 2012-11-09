@@ -23,7 +23,6 @@
 
 #ifndef SRC_SLAVES_H_
 #define SRC_SLAVES_H_
-#include <semaphore.h>
 #include <stdint.h>
 #include <deque>
 #include <string>
@@ -56,8 +55,6 @@ namespace cbt {
         void startThreads(uint32_t num = 1);
         void stopThreads();
 
-        static void initSleepSemaphore();
-        static int readSleepSemaphore();
       protected:
         class ThreadStruct {
           public:
@@ -114,7 +111,6 @@ namespace cbt {
         virtual void printElements();
 #endif  // CT_NODE_DEBUG
 
-        static sem_t sleepSemaphore_;
         CompressTree* const tree_;
 
         pthread_mutex_t completionMutex_;

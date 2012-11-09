@@ -25,6 +25,7 @@
 #define SRC_COMPRESSTREE_H_
 
 #include <pthread.h>
+#include <semaphore.h>
 #include <deque>
 #include <queue>
 #include <vector>
@@ -116,6 +117,7 @@ namespace cbt {
 
         bool allFlush_;
         bool empty_;
+        sem_t sleepSemaphore_;
         EmptyType emptyType_;
         std::deque<Node*> leavesToBeEmptied_;
         std::vector<Node*> allLeaves_;

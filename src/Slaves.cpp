@@ -28,8 +28,6 @@
 #include "Slaves.h"
 
 namespace cbt {
-    sem_t Slave::sleepSemaphore_;
-
     Slave::Slave(CompressTree* tree) :
             tree_(tree),
             askForCompletionNotice_(false),
@@ -103,7 +101,7 @@ namespace cbt {
         }
         if (next > 0) {  // sleeping thread found, so set as awake
             if (getNumberOfSleepingThreads() == numThreads_) {
-                sem_post(&sleepSemaphore_);
+                sem_post(&tree_->sleepSemaphore_);
             }
 #ifdef CT_NODE_DEBUG
             int ret;
@@ -129,7 +127,7 @@ namespace cbt {
 
         // should never block
         if (getNumberOfSleepingThreads() == numThreads_ - 1) {
-            sem_wait(&sleepSemaphore_);
+            assert(sem_trywait(&tree_->sleepSemaphore_) == 0);
         }
 #ifdef CT_NODE_DEBUG
         int ret;
@@ -155,20 +153,6 @@ namespace cbt {
         pthread_spin_lock(&maskLock_);
         bool ret = (getNumberOfSleepingThreads() == numThreads_);
         pthread_spin_unlock(&maskLock_);
-        return ret;
-    }
-
-    void Slave::initSleepSemaphore() {
-#ifdef ENABLE_PAGING
-        sem_init(&sleepSemaphore_, 0, 5);
-#else
-        sem_init(&sleepSemaphore_, 0, 4);
-#endif
-    }
-
-    int Slave::readSleepSemaphore() {
-        int ret;
-        sem_getvalue(&sleepSemaphore_, &ret);
         return ret;
     }
 
