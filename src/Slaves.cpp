@@ -105,7 +105,7 @@ namespace cbt {
             }
 #ifdef CT_NODE_DEBUG
             int ret;
-            sem_getvalue(&sleepSemaphore_, &ret);
+            sem_getvalue(&tree_->sleepSemaphore_, &ret);
             fprintf(stderr, "%s (%d) fingered [sem: %d]\n",
                     getSlaveName().c_str(), next - 1, ret);
 #endif  // CT_NODE_DEBUG
@@ -131,7 +131,7 @@ namespace cbt {
         }
 #ifdef CT_NODE_DEBUG
         int ret;
-        sem_getvalue(&sleepSemaphore_, &ret);
+        sem_getvalue(&tree_->sleepSemaphore_, &ret);
         fprintf(stderr, "%s (%d) sleeping [sem: %d]\n",
                 getSlaveName().c_str(), ind, ret);
 #endif  // CT_NODE_DEBUG
