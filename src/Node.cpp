@@ -342,6 +342,10 @@ namespace cbt {
             a->size_ += buf_size;
         }
         a->num_++;
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
+                buffer_.numElements(), aux.numElements());
+#endif
 
         // free pointer memory
         free(buffer_.perm_);
