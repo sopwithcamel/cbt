@@ -71,6 +71,8 @@ namespace cbtservice {
 
         uint32_t number_of_paos = 100000;
 
+        SetupGenerators();
+
         for (int request_nbr = 0; ; request_nbr++) {
             std::stringstream ss;
             std::vector<PartialAgg*> paos;
@@ -95,14 +97,12 @@ namespace cbtservice {
         }
     }
 
-    void CBTClient::GenerateFillers(uint32_t filler_len) {
-        for (uint32_t i = 0; i < kNumFillers; ++i) {
-            char* f = new char[filler_len + 1];
-            for (uint32_t j = 0; j < filler_len; ++j)
-                f[j] = 97 + rand() % kLettersInAlphabet;
-            f[filler_len] = '\0';
-            fillers_.push_back(f);
-        }
+    void CBTClient::SetupGenerators() {
+        uint32_t num_full_loops_ =
+            (int)floor(Conv26(log2(kNumUniqKeys)));
+        uint32_t part_loop_ = (int)ceil(kNumUniqKeys /
+                pow(26, num_full_loops_));
+        GenerateFillers(kKeyLen - num_full_loops_ - 1);
     }
 
     void CBTClient::GeneratePAOs(std::vector<PartialAgg*>& paos,
@@ -117,6 +117,16 @@ namespace cbtservice {
         }
     }
 
+    void CBTClient::GenerateFillers(uint32_t filler_len) {
+        for (uint32_t i = 0; i < kNumFillers; ++i) {
+            char* f = new char[filler_len + 1];
+            for (uint32_t j = 0; j < filler_len; ++j)
+                f[j] = 97 + rand() % kLettersInAlphabet;
+            f[filler_len] = '\0';
+            fillers_.push_back(f);
+        }
+    }
+
     void CBTClient::GenerateUniformPAOs(
             std::vector<PartialAgg*>& paos, uint32_t number_of_paos) {
 
@@ -124,8 +134,6 @@ namespace cbtservice {
                 (int)floor(Conv26(log2(kNumUniqKeys)));
         uint32_t part_loop_ = (int)ceil(kNumUniqKeys /
                 pow(26, num_full_loops_));
-
-        GenerateFillers(kKeyLen - num_full_loops_ - 1);
 
         char* word = new char[kKeyLen + 1];
         assert(number_of_paos < kMaxPAOs);
@@ -162,8 +170,6 @@ namespace cbtservice {
                 (int)floor(Conv26(log2(kNumUniqKeys)));
         uint32_t part_loop_ = (int)ceil(kNumUniqKeys /
                 pow(26, num_full_loops_));
-
-        GenerateFillers(kKeyLen - num_full_loops_ - 1);
 
         char* word = new char[kKeyLen + 1];
         assert(number_of_paos < kMaxPAOs);

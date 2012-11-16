@@ -58,6 +58,7 @@ namespace cbtservice {
         }
 
         void GenerateFillers(uint32_t filler_len);
+        void SetupGenerators();
         void GeneratePAOs(std::vector<PartialAgg*>& paos,
                 uint32_t number_of_paos);
         void GenerateUniformPAOs(std::vector<PartialAgg*>& paos,
