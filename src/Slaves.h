@@ -101,6 +101,7 @@ namespace cbt {
 
         // Thread-mask related functions
         void setThreadSleep(uint32_t index);
+        void setThreadAwake(uint32_t index);
         // to be called only when holding maskLock_
         uint32_t getNumberOfSleepingThreads();
         bool allAsleep();

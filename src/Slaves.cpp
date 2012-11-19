@@ -99,18 +99,13 @@ namespace cbt {
             if (temp & 1)
                 break;
         }
-        if (next > 0) {  // sleeping thread found, so set as awake
-            if (getNumberOfSleepingThreads() == numThreads_) {
-                sem_post(&tree_->sleepSemaphore_);
-            }
+        if (next > 0) {  // sleeping thread found
 #ifdef CT_NODE_DEBUG
             int ret;
             sem_getvalue(&tree_->sleepSemaphore_, &ret);
             fprintf(stderr, "%s (%d) fingered [sem: %d]\n",
                     getSlaveName().c_str(), next - 1, ret);
 #endif  // CT_NODE_DEBUG
-
-            tmask_ &= ~(1 << (next - 1));
         }
         pthread_spin_unlock(&maskLock_);
 
@@ -137,6 +132,17 @@ namespace cbt {
 #endif  // CT_NODE_DEBUG
 
         tmask_ |= (1 << ind);
+        pthread_spin_unlock(&maskLock_);
+    }
+
+    void Slave::setThreadAwake(uint32_t ind) {
+        pthread_spin_lock(&maskLock_);
+        // check if all are asleep
+        if (getNumberOfSleepingThreads() == numThreads_) {
+            sem_post(&tree_->sleepSemaphore_);
+        }
+        // set thread as awake
+        tmask_ &= ~(1 << ind );
         pthread_spin_unlock(&maskLock_);
     }
 
@@ -188,6 +194,8 @@ namespace cbt {
             pthread_mutex_lock(&(me->mutex_));
             pthread_cond_wait(&(me->hasWork_), &(me->mutex_));
             pthread_mutex_unlock(&(me->mutex_));
+
+            setThreadAwake(me->index_);
 
             // Actually do Slave work
             while (true) {
