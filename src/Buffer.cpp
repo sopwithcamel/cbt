@@ -271,6 +271,96 @@ namespace cbt {
         delete[] rstack;
     }
 
+    void Buffer::insertion_sort(uint32_t uleft, uint32_t uright) {
+        uint32_t x, y, temp;
+        uint32_t size_temp;
+        char* per_temp;
+        uint32_t* array = lists_[0]->hashes_;
+        uint32_t* sizes = lists_[0]->sizes_;
+        for (x = uleft; x < uright; ++x) {
+            for (y = x; y > uleft && array[y - 1] > array[y]; y--) {
+                temp = array[y];
+                array[y] = array[y-1];
+                array[y-1] = temp;
+
+                size_temp = sizes[y];
+                sizes[y] = sizes[y-1];
+                sizes[y-1] = size_temp;
+
+                per_temp = perm_[y];
+                perm_[y] = perm_[y-1];
+                perm_[y-1] = per_temp;
+            }
+        }
+    }
+
+    void Buffer::radixsort(uint32_t uleft, uint32_t uright, uint32_t shift) {
+        uint32_t x, y, value, temp;
+        uint32_t last[256] = { 0 }, pointer[256];
+
+        uint32_t* array = lists_[0]->hashes_;
+        uint32_t* sizes = lists_[0]->sizes_;
+
+        uint32_t size, size_temp;
+        char *per, *per_temp;
+        
+
+        for (x = uleft; x < uright; ++x) {
+            ++last[(array[x] >> shift) & 0xFF];
+        }
+
+        last[0] += uleft;
+        pointer[0] = uleft;
+
+        for (x = 1; x < 256; ++x) {
+            pointer[x] = last[x - 1];
+            last[x] += last[x - 1];
+        }
+
+        for (x = 0; x < 256; ++x) {
+            while (pointer[x] != last[x]) {
+                value = array[pointer[x]];
+                size = sizes[pointer[x]];
+                per = perm_[pointer[x]];
+                
+                y = (value >> shift) & 0xFF;
+                while (x != y) {
+                    temp = array[pointer[y]];
+                    array[pointer[y]] = value;
+                    value = temp;
+
+                    size_temp = sizes[pointer[y]];
+                    sizes[pointer[y]] = size;
+                    size = size_temp;
+
+                    per_temp = perm_[pointer[y]];
+                    perm_[pointer[y]] = per;
+                    per = per_temp;
+
+                    pointer[y]++;
+                    y = (value >> shift) & 0xFF;
+                }
+                array[pointer[x]] = value;
+                sizes[pointer[x]] = size;
+                perm_[pointer[x]] = per;
+                pointer[x]++;
+            }
+        }
+
+        if (shift > 0) {
+            shift -= 8;
+            for (x=0; x<256; ++x) {
+                temp = x > 0 ? pointer[x] - pointer[x-1] : pointer[0] - uleft;
+                if (temp > 64) {
+                    radixsort(pointer[x] - temp, pointer[x], shift);
+                } else if (temp > 1) {
+                    // std::sort(array + (pointer[x] - temp), array + pointer[x]);
+                    insertion_sort(pointer[x] - temp, pointer[x]);
+                }
+            }
+        }
+    }
+
     // Sorting-related
     bool Buffer::sort() {
         if (empty())
@@ -285,7 +375,8 @@ namespace cbt {
         }
 
         // quicksort elements
-        quicksort(0, num - 1);
+//        quicksort(0, num - 1);
+        radixsort(0, num - 1, 24);
         return true;
     }
 

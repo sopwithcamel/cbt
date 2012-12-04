@@ -139,6 +139,8 @@ namespace cbt {
 
           /* Sorting-related */
           void quicksort(uint32_t left, uint32_t right);
+          void radixsort(uint32_t left, uint32_t right, uint32_t shift);
+          void insertion_sort(uint32_t left, uint32_t right);
           bool sort();
 
           /* Merge the sorted sub-lists of the buffer */
