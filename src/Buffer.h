@@ -170,6 +170,8 @@ namespace cbt {
           bool compressible_;
           // used during sort
           char** perm_;
+          // used during merge
+          List* aux_list_;
 
 #ifdef ENABLE_PAGING
           /* Paging-related */

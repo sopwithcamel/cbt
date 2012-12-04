@@ -268,14 +268,21 @@ namespace cbt {
         return ret;
     }
 
-    bool Node::aggregateSortedBuffer() {
+    bool Node::aggregateBuffer(const Action& act) {
         // initialize auxiliary buffer
         Buffer aux;
         Buffer::List* a = aux.addList();
 
         // aggregate elements in buffer
         uint32_t lastIndex = 0;
-        Buffer::List* l = buffer_.lists_[0];
+
+        // set up the input list
+        Buffer::List* l;
+        if (act == SORT || buffer_.lists_.size() == 1)
+            l = buffer_.lists_[0];
+        else
+            l = buffer_.aux_list_;
+
         for (uint32_t i = 1; i < l->num_; ++i) {
             if (l->hashes_[i] == l->hashes_[lastIndex]) {
                 // aggregate elements
@@ -349,6 +356,8 @@ namespace cbt {
 
         // free pointer memory
         free(buffer_.perm_);
+        if (act == MERGE && buffer_.lists_.size() > 1)
+            buffer_.aux_list_->deallocate();
 
         // clear buffer and shallow copy aux into buffer
         // aux is on stack and will be destroyed
@@ -364,105 +373,6 @@ namespace cbt {
         bool ret = buffer_.merge();
         checkIntegrity();
         return ret;
-    }
-
-    bool Node::aggregateMergedBuffer() {
-        if (buffer_.empty())
-            return true;
-        // initialize aux buffer
-        Buffer aux;
-        Buffer::List* a;
-        if (buffer_.numElements() < MAX_ELS_PER_BUFFER)
-            a = aux.addList();
-        else
-            a = aux.addList(/*isLarge=*/true);
-
-        Buffer::List* l = buffer_.lists_[0];
-        uint32_t num = buffer_.numElements();
-        uint32_t numMerged = 0;
-        uint32_t offset = 0;
-
-        uint32_t lastIndex = 0;
-        offset += l->sizes_[0];
-        uint32_t lastOffset = 0;
-
-        // aggregate elements in buffer
-        for (uint32_t i = 1; i < num; ++i) {
-            if (l->hashes_[i] == l->hashes_[lastIndex]) {
-                if (numMerged == 0) {
-                    if (!(tree_->ops->deserialize(lastPAO,
-                            l->data_ + lastOffset, l->sizes_[lastIndex]))) {
-                        fprintf(stderr, "Can't deserialize at %u, index: %u\n",
-                                lastOffset, lastIndex);
-                        assert(false);
-                    }
-                }
-                if (!(tree_->ops->deserialize(thisPAO, l->data_ + offset,
-                        l->sizes_[i]))) {
-                    fprintf(stderr, "Can't deserialize at %u, index: %u\n",
-                            offset, i);
-                    assert(false);
-                }
-                if (tree_->ops->sameKey(thisPAO, lastPAO)) {
-                    tree_->ops->merge(lastPAO, thisPAO);
-#ifdef ENABLE_COUNTERS
-                    tree_->monitor_->numElements--;
-                    tree_->monitor_->numMerged++;
-#endif
-                    numMerged++;
-                    offset += l->sizes_[i];
-                    continue;
-                }
-            }
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            if (numMerged == 0) {
-                uint32_t buf_size = l->sizes_[lastIndex];
-                a->sizes_[a->num_] = l->sizes_[lastIndex];
-                // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-                memmove(a->data_ + a->size_,
-                        reinterpret_cast<void*>(l->data_ + lastOffset),
-                        l->sizes_[lastIndex]);
-                a->size_ += buf_size;
-            } else {
-                uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-                tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-                a->sizes_[a->num_] = buf_size;
-                a->size_ += buf_size;
-            }
-            a->num_++;
-            numMerged = 0;
-            lastIndex = i;
-            lastOffset = offset;
-            offset += l->sizes_[i];
-        }
-        // copy last PAO
-        a->hashes_[a->num_] = l->hashes_[lastIndex];
-        if (numMerged == 0) {
-            uint32_t buf_size = l->sizes_[lastIndex];
-            a->sizes_[a->num_] = l->sizes_[lastIndex];
-            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(l->data_ + lastOffset),
-                    l->sizes_[lastIndex]);
-            a->size_ += buf_size;
-        } else {
-            uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-            tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-            a->sizes_[a->num_] = buf_size;
-            a->size_ += buf_size;
-        }
-        a->num_++;
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
-                buffer_.numElements(), aux.numElements());
-#endif
-
-        // clear buffer and copy over aux.
-        // aux itself is on the stack and will be destroyed
-        buffer_.deallocate();
-        buffer_.lists_ = aux.lists_;
-        aux.clear();
-        return true;
     }
 
     /* A leaf is split by moving half the elements of the buffer into a
@@ -816,7 +726,8 @@ namespace cbt {
         } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
             // we're decompressing twice
             fprintf(stderr, "decompressing node %d twice", id());
-            assert(false);
+//            assert(false);
+            ret = true;
         } else { // NONE
             setQueueStatus(act);
             ret = true;
@@ -909,7 +820,7 @@ namespace cbt {
                 {
                     if (isRoot()) {
                         sortBuffer();
-                        aggregateSortedBuffer();
+                        aggregateBuffer(SORT);
                     } else {
                         assert(false && "Only the root buffer is sorted");
                     }
@@ -919,7 +830,7 @@ namespace cbt {
                 {
                     if (!isRoot()) {
                         mergeBuffer();
-                        aggregateMergedBuffer();
+                        aggregateBuffer(MERGE);
                     } else {
                         assert(false && "root buffer never sorted");
                     }

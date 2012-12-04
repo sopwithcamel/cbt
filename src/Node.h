@@ -105,9 +105,8 @@ namespace cbt {
         bool sortBuffer();
         /* Merge the buffer based on hash value */
         bool mergeBuffer();
-        /* Aggregate the sorted root buffer */
-        bool aggregateSortedBuffer();
-        bool aggregateMergedBuffer();
+        /* Aggregate the sorted/merged buffer */
+        bool aggregateBuffer(const Action& act);
         /* copy contents from node's buffer into this buffer. Starting from
          * index = index, copy num elements' data.
          */

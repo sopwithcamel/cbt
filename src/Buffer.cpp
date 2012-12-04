@@ -294,16 +294,28 @@ namespace cbt {
                 std::vector<Buffer::MergeElement>,
                 MergeComparator> queue;
 
-        if (lists_.size() == 1 || empty())
+        if (empty())
             return true;
 
-        // initialize aux buffer
-        Buffer aux;
-        Buffer::List* a;
+        // initialize pointers to serialized PAOs
+        uint32_t num = numElements();
+        perm_ = reinterpret_cast<char**>(malloc(sizeof(char*) * num));
+
+        // aggregate expects permutation pointers
+        if (lists_.size() == 1) {
+            uint32_t offset = 0;
+            for (uint32_t i = 0; i < num; ++i) {
+                perm_[i] = lists_[0]->data_ + offset;
+                offset += lists_[0]->sizes_[i];
+            }
+            return true;
+        }
+
+        aux_list_ = new List();
         if (numElements() < MAX_ELS_PER_BUFFER)
-            a = aux.addList();
+            aux_list_->allocate(/*large buffer=*/false);
         else
-            a = aux.addList(/*large buffer=*/true);
+            aux_list_->allocate(/*large buffer=*/true);
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
@@ -320,36 +332,15 @@ namespace cbt {
             queue.pop();
 
             // copy hash values
-            a->hashes_[a->num_] = n.hash();
+            aux_list_->hashes_[aux_list_->num_] = n.hash();
             uint32_t buf_size = n.size();
-            a->sizes_[a->num_] = buf_size;
-            // memset(a->data_ + a->size_, 0, buf_size);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(n.data()), buf_size);
-            a->size_ += buf_size;
-            a->num_++;
-/*
-            if (a->num_ >= MAX_ELS_PER_BUFFER) {
-                fprintf(stderr, "Num elements: %u\n", a->num_);
-                assert(false);
-            }
-*/
+            aux_list_->sizes_[aux_list_->num_] = buf_size;
+            perm_[aux_list_->num_] = n.data();
+            aux_list_->num_++;
             // increment n pointer and re-insert n into prioQ
             if (n.next())
                 queue.push(n);
         }
-
-        // clear buffer and copy over aux.
-        // aux itself is on the stack and will be destroyed
-        deallocate();
-        lists_ = aux.lists_;
-        aux.clear();
-
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d merged; new size: %d\n", id(),
-                numElements());
-#endif  // CT_NODE_DEBUG
-
         return true;
     }
 
