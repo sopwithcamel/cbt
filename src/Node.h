@@ -67,43 +67,6 @@ namespace cbt {
         friend class Slave;
         friend class PriorityDAG;
 
-        class MergeElement {
-          public:
-            explicit MergeElement(Buffer::List* l) {
-                ind = off = 0;
-                list = l;
-            }
-            uint32_t hash() {
-                return list->hashes_[ind];
-            }
-            uint32_t size() {
-                return list->sizes_[ind];
-            }
-            char* data() {
-                return list->data_ + off;
-            }
-            bool next() {
-                if (ind >= list->num_-1) {
-                    return false;
-                }
-                off += list->sizes_[ind];
-                ind++;
-                return true;
-            }
-            uint32_t ind;           // index of hash being compared
-            uint32_t off;           // offset of serialized PAO
-            Buffer::List* list;     // list containing element
-        };
-
-        class MergeComparator {
-          public:
-            bool operator()(const MergeElement& lhs,
-                    const MergeElement& rhs) const {
-                return (lhs.list->hashes_[lhs.ind] >
-                        rhs.list->hashes_[rhs.ind]);
-            }
-        };
-
       public:
         explicit Node(CompressTree* tree, uint32_t level);
         ~Node();
@@ -140,11 +103,11 @@ namespace cbt {
         /* Sort the root buffer based on hash value. All other nodes can
          * aggregating by merging. */
         bool sortBuffer();
+        /* Merge the buffer based on hash value */
+        bool mergeBuffer();
         /* Aggregate the sorted root buffer */
         bool aggregateSortedBuffer();
         bool aggregateMergedBuffer();
-        /* Merge the sorted sub-lists of the buffer */
-        bool mergeBuffer();
         /* copy contents from node's buffer into this buffer. Starting from
          * index = index, copy num elements' data.
          */

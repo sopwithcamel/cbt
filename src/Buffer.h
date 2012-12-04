@@ -37,7 +37,6 @@ namespace cbt {
         friend class Compressor;
 
         public:
-
 #ifdef ENABLE_PAGING
           enum PageAction {
               NO_PAGE,
@@ -74,6 +73,44 @@ namespace cbt {
               size_t c_sizelen_;
               size_t c_datalen_;
           };
+
+          class MergeElement {
+            public:
+              explicit MergeElement(Buffer::List* l) {
+                  ind = off = 0;
+                  list = l;
+              }
+              uint32_t hash() {
+                  return list->hashes_[ind];
+              }
+              uint32_t size() {
+                  return list->sizes_[ind];
+              }
+              char* data() {
+                  return list->data_ + off;
+              }
+              bool next() {
+                  if (ind >= list->num_-1) {
+                      return false;
+                  }
+                  off += list->sizes_[ind];
+                  ind++;
+                  return true;
+              }
+              uint32_t ind;           // index of hash being compared
+              uint32_t off;           // offset of serialized PAO
+              Buffer::List* list;     // list containing element
+          };
+
+          class MergeComparator {
+            public:
+              bool operator()(const MergeElement& lhs,
+                      const MergeElement& rhs) const {
+                  return (lhs.list->hashes_[lhs.ind] >
+                          rhs.list->hashes_[rhs.ind]);
+              }
+          };
+
           Buffer();
           Buffer(const Buffer&);
           // clears all buffer state
@@ -103,6 +140,9 @@ namespace cbt {
           /* Sorting-related */
           void quicksort(uint32_t left, uint32_t right);
           bool sort();
+
+          /* Merge the sorted sub-lists of the buffer */
+          bool merge();
 
           /* Compression-related */
           bool compress();

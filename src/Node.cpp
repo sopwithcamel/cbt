@@ -361,69 +361,9 @@ namespace cbt {
     }
 
     bool Node::mergeBuffer() {
-        std::priority_queue<Node::MergeElement,
-                std::vector<Node::MergeElement>,
-                MergeComparator> queue;
-
-        if (buffer_.lists_.size() == 1 || buffer_.empty())
-            return true;
-
-        checkSerializationIntegrity();
-        // initialize aux buffer
-        Buffer aux;
-        Buffer::List* a;
-        if (buffer_.numElements() < MAX_ELS_PER_BUFFER)
-            a = aux.addList();
-        else
-            a = aux.addList(/*large buffer=*/true);
-
-        // Load each of the list heads into the priority queue
-        // keep track of offsets for possible deserialization
-        for (uint32_t i = 0; i < buffer_.lists_.size(); ++i) {
-            if (buffer_.lists_[i]->num_ > 0) {
-                Node::MergeElement* mge = new Node::MergeElement(
-                        buffer_.lists_[i]);
-                queue.push(*mge);
-            }
-        }
-
-        while (!queue.empty()) {
-            Node::MergeElement n = queue.top();
-            queue.pop();
-
-            // copy hash values
-            a->hashes_[a->num_] = n.hash();
-            uint32_t buf_size = n.size();
-            a->sizes_[a->num_] = buf_size;
-            // memset(a->data_ + a->size_, 0, buf_size);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(n.data()), buf_size);
-            a->size_ += buf_size;
-            a->num_++;
-/*
-            if (a->num_ >= MAX_ELS_PER_BUFFER) {
-                fprintf(stderr, "Num elements: %u\n", a->num_);
-                assert(false);
-            }
-*/
-            // increment n pointer and re-insert n into prioQ
-            if (n.next())
-                queue.push(n);
-        }
-
-        // clear buffer and copy over aux.
-        // aux itself is on the stack and will be destroyed
-        buffer_.deallocate();
-        buffer_.lists_ = aux.lists_;
-        aux.clear();
-        checkSerializationIntegrity();
-
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d merged; new size: %d\n", id(),
-                buffer_.numElements());
-#endif  // CT_NODE_DEBUG
-
-        return true;
+        bool ret = buffer_.merge();
+        checkIntegrity();
+        return ret;
     }
 
     bool Node::aggregateMergedBuffer() {
