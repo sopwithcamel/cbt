@@ -44,8 +44,7 @@ namespace cbt {
 
     inline bool Slave::empty() {
         pthread_spin_lock(&nodesLock_);
-        bool ret = nodes_.empty() &&
-                (getNumberOfSleepingThreads() == numThreads_);
+        bool ret = nodes_.empty() && allAsleep();
         pthread_spin_unlock(&nodesLock_);
         return ret;
     }
@@ -119,11 +118,6 @@ namespace cbt {
 
     inline void Slave::setThreadSleep(uint32_t ind) {
         pthread_spin_lock(&maskLock_);
-
-        // should never block
-        if (getNumberOfSleepingThreads() == numThreads_ - 1) {
-            assert(sem_trywait(&tree_->sleepSemaphore_) == 0);
-        }
 #ifdef CT_NODE_DEBUG
         int ret;
         sem_getvalue(&tree_->sleepSemaphore_, &ret);
@@ -137,10 +131,6 @@ namespace cbt {
 
     void Slave::setThreadAwake(uint32_t ind) {
         pthread_spin_lock(&maskLock_);
-        // check if all are asleep
-        if (getNumberOfSleepingThreads() == numThreads_) {
-            sem_post(&tree_->sleepSemaphore_);
-        }
         // set thread as awake
         tmask_ &= ~(1 << ind );
         pthread_spin_unlock(&maskLock_);
@@ -187,6 +177,8 @@ namespace cbt {
         pthread_barrier_wait(&tree_->threadsBarrier_);
 
         while (!more()) {
+            // should never block
+            assert(sem_trywait(&tree_->sleepSemaphore_) == 0);
             // mark thread as sleeping in mask
             setThreadSleep(me->index_);
 
@@ -194,6 +186,8 @@ namespace cbt {
             pthread_mutex_lock(&(me->mutex_));
             pthread_cond_wait(&(me->hasWork_), &(me->mutex_));
             pthread_mutex_unlock(&(me->mutex_));
+
+            sem_post(&tree_->sleepSemaphore_);
 
             setThreadAwake(me->index_);
 

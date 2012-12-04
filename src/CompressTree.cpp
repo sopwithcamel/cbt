@@ -60,12 +60,6 @@ namespace cbt {
 
         pthread_mutex_init(&emptyRootNodesMutex_, NULL);
 
-#ifdef ENABLE_PAGING
-        sem_init(&sleepSemaphore_, 0, 5);
-#else
-        sem_init(&sleepSemaphore_, 0, 4);
-#endif
-
 #ifdef ENABLE_COUNTERS
         monitor_ = NULL;
 #endif
@@ -416,6 +410,7 @@ namespace cbt {
         threadCount += monitorThreadCount;
 #endif
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
+        sem_init(&sleepSemaphore_, 0, threadCount - 1);
 
         sorter_ = new Sorter(this);
         sorter_->startThreads(sorterThreadCount);
