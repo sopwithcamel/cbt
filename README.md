@@ -14,7 +14,8 @@ cbt
 * [libdl](http://www.s-gms.ms.edus.si/cgi-bin/man-cgi?libdl+3LIB)
 * [tcmalloc](http://code.google.com/p/gperftools/)
 
-# Installation #
-	sudo apt-get install scons cppcheck libgtest-dev libprotobuf-dev
-
-
+# Installation on Ubuntu #
+## For CBT ##
+	sudo apt-get install scons cppcheck libgtest-dev libprotobuf-dev libsnappy-dev libjemalloc-dev
+## For server ##
+    sudo apt-get install libzmq-dev
