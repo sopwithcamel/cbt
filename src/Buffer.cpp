@@ -28,8 +28,8 @@
 #include <sstream>
 #include "Buffer.h"
 #include "CompressTree.h"
-// #include "compsort.h"
-// #include "rle.h"
+#include "compsort.h"
+#include "rle.h"
 #include "snappy.h"
 
 namespace cbt {
@@ -435,6 +435,112 @@ namespace cbt {
         return true;
     }
 
+    bool Buffer::aggregate(bool isSort) {
+        // initialize auxiliary buffer
+        Buffer aux;
+        Buffer::List* a = aux.addList();
+
+        // aggregate elements in buffer
+        uint32_t lastIndex = 0;
+
+        // set up the input list
+        Buffer::List* l;
+        if (isSort || lists_.size() == 1)
+            l = lists_[0];
+        else
+            l = aux_list_;
+
+        const Operations* o = node_->tree_->ops;
+
+        // Check that PAOs are actually created
+        PartialAgg *lastPAO, *thisPAO;
+        assert(1 == o->createPAO(NULL, &lastPAO));
+        assert(1 == o->createPAO(NULL, &thisPAO));
+
+        for (uint32_t i = 1; i < l->num_; ++i) {
+            if (l->hashes_[i] == l->hashes_[lastIndex]) {
+                // aggregate elements
+                if (i == lastIndex + 1) {
+                    if (!(o->deserialize(lastPAO,
+                                    perm_[lastIndex],
+                                    l->sizes_[lastIndex]))) {
+                        fprintf(stderr, "Error at index %d\n", i);
+                        assert(false);
+                    }
+                }
+                assert(o->deserialize(thisPAO, perm_[i],
+                            l->sizes_[i]));
+                if (o->sameKey(thisPAO, lastPAO)) {
+                    o->merge(lastPAO, thisPAO);
+                    continue;
+                }
+            }
+            // copy hash and size into auxBuffer_
+            a->hashes_[a->num_] = l->hashes_[lastIndex];
+            if (i == lastIndex + 1) {
+                // the size wouldn't have changed
+                a->sizes_[a->num_] = l->sizes_[lastIndex];
+                //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+                memmove(a->data_ + a->size_,
+                        reinterpret_cast<void*>(perm_[lastIndex]),
+                        l->sizes_[lastIndex]);
+                a->size_ += l->sizes_[lastIndex];
+            } else {
+                uint32_t buf_size = o->getSerializedSize(lastPAO);
+                o->serialize(lastPAO, a->data_ + a->size_, buf_size);
+
+                a->sizes_[a->num_] = buf_size;
+                a->size_ += buf_size;
+#ifdef ENABLE_COUNTERS
+                tree_->monitor_->bctr++;
+#endif
+            }
+            a->num_++;
+            lastIndex = i;
+        }
+        // copy the last PAO; TODO: Clean this up!
+        // copy hash and size into auxBuffer_
+        if (lastIndex == l->num_-1) {
+            a->hashes_[a->num_] = l->hashes_[lastIndex];
+            // the size wouldn't have changed
+            a->sizes_[a->num_] = l->sizes_[lastIndex];
+            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
+            memmove(a->data_ + a->size_,
+                    reinterpret_cast<void*>(perm_[lastIndex]),
+                    l->sizes_[lastIndex]);
+            a->size_ += l->sizes_[lastIndex];
+        } else {
+            uint32_t buf_size = o->getSerializedSize(lastPAO);
+            o->serialize(lastPAO, a->data_ + a->size_, buf_size);
+
+            a->hashes_[a->num_] = l->hashes_[lastIndex];
+            a->sizes_[a->num_] = buf_size;
+            a->size_ += buf_size;
+        }
+        a->num_++;
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
+                numElements(), aux.numElements());
+#endif
+
+        // free pointer memory
+        free(perm_);
+        if (!isSort && lists_.size() > 1)
+            aux_list_->deallocate();
+
+        // destroy temporary PAOs
+        o->destroyPAO(lastPAO);
+        o->destroyPAO(thisPAO);
+
+        // clear buffer and shallow copy aux into buffer
+        // aux is on stack and will be destroyed
+
+        deallocate();
+        lists_ = aux.lists_;
+        aux.clear();
+        return true;
+    }
+
     // Compression-related    
 
     bool Buffer::compress() {
@@ -454,6 +560,7 @@ namespace cbt {
                 // latest added list
                 Buffer::List* cl =
                         compressed.lists_[compressed.lists_.size()-1];
+#ifndef ENABLE_SPECIALIZED_COMPRESSION
                 snappy::RawCompress((const char*)l->hashes_,
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->hashes_),
@@ -462,12 +569,12 @@ namespace cbt {
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->sizes_),
                         &l->c_sizelen_);
-/*
+#else
                 compsort::compress(l->hashes_, l->num_,
                         cl->hashes_, (uint32_t&)l->c_hashlen_);
                 rle::encode(l->sizes_, l->num_, cl->sizes_,
                         (uint32_t&)l->c_sizelen_);
-*/
+#endif
                 snappy::RawCompress(l->data_, l->size_,
                         cl->data_,
                         &l->c_datalen_);
@@ -500,17 +607,18 @@ namespace cbt {
                 // latest added list
                 Buffer::List* l =
                         decompressed.lists_[decompressed.lists_.size()-1];
+#ifndef ENABLE_SPECIALIZED_COMPRESSION
                 snappy::RawUncompress((const char*)cl->hashes_,
                         cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
                 snappy::RawUncompress((const char*)cl->sizes_,
                         cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
-/*
+#else
                 uint32_t siz;
                 compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
                         l->hashes_, siz);
                 rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
                         l->sizes_, siz);
-*/
+#endif
                 snappy::RawUncompress(cl->data_, cl->c_datalen_,
                         l->data_);
                 cl->deallocate();

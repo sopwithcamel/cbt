@@ -46,10 +46,6 @@ namespace cbt {
         id_ = tree_->nodeCtr++;
         buffer_.setParent(this);
 
-        // Check that PAOs are actually created
-        assert(1 == tree_->ops->createPAO(NULL, &lastPAO));
-        assert(1 == tree_->ops->createPAO(NULL, &thisPAO));
-
         pthread_mutex_init(&emptyMutex_, NULL);
         pthread_cond_init(&emptyCond_, NULL);
 
@@ -69,9 +65,6 @@ namespace cbt {
     }
 
     Node::~Node() {
-        tree_->ops->destroyPAO(lastPAO);
-        tree_->ops->destroyPAO(thisPAO);
-
         pthread_mutex_destroy(&sortMutex_);
         pthread_cond_destroy(&sortCond_);
 
@@ -269,104 +262,9 @@ namespace cbt {
     }
 
     bool Node::aggregateBuffer(const Action& act) {
-        // initialize auxiliary buffer
-        Buffer aux;
-        Buffer::List* a = aux.addList();
-
-        // aggregate elements in buffer
-        uint32_t lastIndex = 0;
-
-        // set up the input list
-        Buffer::List* l;
-        if (act == SORT || buffer_.lists_.size() == 1)
-            l = buffer_.lists_[0];
-        else
-            l = buffer_.aux_list_;
-
-        for (uint32_t i = 1; i < l->num_; ++i) {
-            if (l->hashes_[i] == l->hashes_[lastIndex]) {
-                // aggregate elements
-                if (i == lastIndex + 1) {
-                    if (!(tree_->ops->deserialize(lastPAO,
-                            buffer_.perm_[lastIndex],
-                            l->sizes_[lastIndex]))) {
-                        fprintf(stderr, "Error at index %d\n", i);
-                        assert(false);
-                    }
-                }
-                assert(tree_->ops->deserialize(thisPAO, buffer_.perm_[i],
-                        l->sizes_[i]));
-                if (tree_->ops->sameKey(thisPAO, lastPAO)) {
-                    tree_->ops->merge(lastPAO, thisPAO);
-#ifdef ENABLE_COUNTERS
-                    tree_->monitor_->numElements--;
-                    tree_->monitor_->numMerged++;
-                    tree_->monitor_->cctr++;
-#endif
-                    continue;
-                }
-            }
-            // copy hash and size into auxBuffer_
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            if (i == lastIndex + 1) {
-                // the size wouldn't have changed
-                a->sizes_[a->num_] = l->sizes_[lastIndex];
-//                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-                memmove(a->data_ + a->size_,
-                        reinterpret_cast<void*>(buffer_.perm_[lastIndex]),
-                        l->sizes_[lastIndex]);
-                a->size_ += l->sizes_[lastIndex];
-            } else {
-                uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-                tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-
-                a->sizes_[a->num_] = buf_size;
-                a->size_ += buf_size;
-#ifdef ENABLE_COUNTERS
-                tree_->monitor_->bctr++;
-#endif
-            }
-            a->num_++;
-            lastIndex = i;
-        }
-        // copy the last PAO; TODO: Clean this up!
-        // copy hash and size into auxBuffer_
-        if (lastIndex == l->num_-1) {
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            // the size wouldn't have changed
-            a->sizes_[a->num_] = l->sizes_[lastIndex];
-            // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-            memmove(a->data_ + a->size_,
-                    reinterpret_cast<void*>(buffer_.perm_[lastIndex]),
-                    l->sizes_[lastIndex]);
-            a->size_ += l->sizes_[lastIndex];
-        } else {
-            uint32_t buf_size = tree_->ops->getSerializedSize(lastPAO);
-            tree_->ops->serialize(lastPAO, a->data_ + a->size_, buf_size);
-
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            a->sizes_[a->num_] = buf_size;
-            a->size_ += buf_size;
-        }
-        a->num_++;
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
-                buffer_.numElements(), aux.numElements());
-#endif
-
-        // free pointer memory
-        free(buffer_.perm_);
-        if (act == MERGE && buffer_.lists_.size() > 1)
-            buffer_.aux_list_->deallocate();
-
-        // clear buffer and shallow copy aux into buffer
-        // aux is on stack and will be destroyed
-
-        buffer_.deallocate();
-        buffer_.lists_ = aux.lists_;
-        aux.clear();
-        checkSerializationIntegrity();
-        return true;
+        bool ret = buffer_.aggregate(act == SORT? true : false);
+        checkIntegrity();
+        return ret;
     }
 
     bool Node::mergeBuffer() {
