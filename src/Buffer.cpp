@@ -544,6 +544,7 @@ namespace cbt {
     // Compression-related    
 
     bool Buffer::compress() {
+#ifdef ENABLE_COMPRESSION
         if (!empty()) {
             // allocate memory for one list
             Buffer compressed;
@@ -591,10 +592,12 @@ namespace cbt {
             // clear compressed list so lists won't be deallocated on return
             compressed.clear();
         }
+#endif  // ENABLE_COMPRESSION
         return true;
     }
 
     bool Buffer::decompress() {
+#ifdef ENABLE_COMPRESSION
         if (!empty()) {
             // allocate memory for decompressed buffers
             Buffer decompressed;
@@ -634,6 +637,7 @@ namespace cbt {
                     node_->id_, numElements());
 #endif  // CT_NODE_DEBUG
         }
+#endif  // ENABLE_COMPRESSION
         return true;
     }
 
