@@ -118,6 +118,8 @@ namespace cbt {
     }
 
     bool CompressTree::nextValue(void*& hash, PartialAgg*& agg) {
+        if (empty_)
+            return false;
         if (!allFlush_) {
             flushBuffers();
             lastLeafRead_ = 0;
@@ -134,8 +136,6 @@ namespace cbt {
             curLeaf->schedule(DECOMPRESS_ONLY);
             curLeaf->wait(DECOMPRESS_ONLY);
         }
-        if (empty_)
-            return false;
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->buffer_.lists_[0];

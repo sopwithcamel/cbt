@@ -190,6 +190,8 @@ namespace cbt {
             sem_post(&tree_->sleepSemaphore_);
 
             setThreadAwake(me->index_);
+            if (checkInputComplete())
+                break;
 
             // Actually do Slave work
             while (true) {
@@ -205,8 +207,6 @@ namespace cbt {
 #endif
                 work(n);
             }
-            if (checkInputComplete())
-                break;
         }
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "%s (%d) quitting: %ld\n",
