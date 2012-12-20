@@ -11,6 +11,14 @@
 
 #ifdef ENABLE_COMPRESSION
 //  #define ENABLE_SPECIALIZED_COMPRESSION
-#endif
+#endif  // ENABLE_COMPRESSION
+
+#ifndef PIPELINED_IMPL
+/* This option structures each buffer as consisting of multiple fragments. A
+ * new fragment is created from each spill of the parent. The advantage of this
+ * method is that previously-created fragments stay compressed in memory until
+ * the buffer fills up (when all fragments are decompressed */
+#define STRUCTURED_BUFFER
+#endif  // PIPELINED_IMPL
 
 #endif // CTCONFIG_H

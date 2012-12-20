@@ -465,7 +465,7 @@ namespace cbt {
         threadCount += (mergerThreadCount + compressorThreadCount +
                 emptierThreadCount + sorterThreadCount);
 #else  // !PIPELINED_IMPL
-        uint32_t genieThreadCount = 4;
+        uint32_t genieThreadCount = 1;
         threadCount += genieThreadCount;
 #endif // PIPELINED_IMPL
 

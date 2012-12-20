@@ -197,6 +197,9 @@ namespace cbt {
                      * than *curHash. This invariant needs to be maintained.
                      */
                     if (curElement > lastElement) {
+#ifndef STRUCTURED_BUFFER
+                        children_[curChild]->buffer_.decompress();
+#endif  // STRUCTURED_BUFFER
                         // copy elements into child
                         children_[curChild]->copyIntoBuffer(l, lastElement,
                                 curElement - lastElement);
@@ -230,6 +233,9 @@ namespace cbt {
 
             // copy remaining elements into child
             if (curElement >= lastElement) {
+#ifndef STRUCTURED_BUFFER
+                children_[curChild]->buffer_.decompress();
+#endif  // STRUCTURED_BUFFER
                 // copy elements into child
                 children_[curChild]->copyIntoBuffer(l, lastElement,
                         curElement - lastElement);
@@ -341,8 +347,10 @@ namespace cbt {
 
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
             uint32_t num) {
+#ifdef PIPELINED_IMPL
         // check if the node is still queued up for a previous compression
         wait(COMPRESS);
+#endif  // PIPELINED_IMPL
 
         // calculate offset
         uint32_t offset = 0;
@@ -361,6 +369,7 @@ namespace cbt {
             assert(false);
         }
 #endif
+#ifdef STRUCTURED_BUFFER
         // allocate a new List in the buffer and copy data into it
         Buffer::List* l = buffer_.addList();
         // memset(l->hashes_, 0, num * sizeof(uint32_t));
@@ -374,6 +383,24 @@ namespace cbt {
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;
+#else  // !STRUCTURED_BUFFER
+        Buffer::List* l;
+        if (buffer_.lists_.size() == 0)
+            l = buffer_.addList();
+        else
+            l = buffer_.lists_[0];
+        // memset(l->hashes_, 0, num * sizeof(uint32_t));
+        memmove(l->hashes_ + l->num_, parent_list->hashes_ + index,
+                num * sizeof(uint32_t));
+        // memset(l->sizes_, 0, num * sizeof(uint32_t));
+        memmove(l->sizes_ + l->num_, parent_list->sizes_ + index,
+                num * sizeof(uint32_t));
+        // memset(l->data_, 0, num_bytes);
+        memmove(l->data_ + l->size_, parent_list->data_ + offset,
+                num_bytes);
+        l->num_ += num;
+        l->size_ += num_bytes;
+#endif  // STRUCTURED_BUFFER
         checkSerializationIntegrity(buffer_.lists_.size()-1);
         return true;
     }
@@ -812,8 +839,13 @@ namespace cbt {
             case DECOMPRESS:  // emptying a non-root node
                 assert(!isRoot());
                 buffer_.decompress();
+#ifdef STRUCTURED_BUFFER
                 mergeBuffer();
                 aggregateBuffer(MERGE);
+#else  // STRUCTURED_BUFFER
+                sortBuffer();
+                aggregateBuffer(SORT);
+#endif  // STRUCTURED_BUFFER
                 emptyBuffer();
                 if (isLeaf())
                     tree_->handleFullLeaves();
