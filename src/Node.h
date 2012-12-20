@@ -168,7 +168,6 @@ namespace cbt {
         /* level in the tree; 0 at leaves and increases upwards */
         uint32_t level_;
         Node* parent_;
-        PartialAgg *lastPAO, *thisPAO;
 
         /* Pointers to children */
         std::vector<Node*> children_;

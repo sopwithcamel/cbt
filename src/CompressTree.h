@@ -79,6 +79,7 @@ namespace cbt {
         void clear();
 
       private:
+        friend class Buffer;
         friend class Node;
         friend class Slave;
         friend class Emptier;

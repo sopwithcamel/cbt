@@ -146,6 +146,9 @@ namespace cbt {
           /* Merge the sorted sub-lists of the buffer */
           bool merge();
 
+          /* Aggregation-related */
+          bool aggregate(bool isSort);
+
           /* Compression-related */
           bool compress();
           bool decompress();
