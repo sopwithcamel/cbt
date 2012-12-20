@@ -36,9 +36,13 @@ namespace cbt {
 
     class Buffer;
     class CompressTree;
+#ifdef PIPELINED_IMPL
     class Emptier;
     class Compressor;
     class Merger;
+#else  // !PIPELINED_IMPL
+    class Genie;
+#endif  // PIPELINED_IMPL
 
     enum Action {
 #ifdef ENABLE_PAGING
@@ -60,10 +64,14 @@ namespace cbt {
         friend class CompressTree;
         friend class Buffer;
         friend class Compressor;
+#ifdef PIPELINED_IMPL
         friend class Emptier;
         friend class Merger;
         friend class Sorter;
         friend class Pager;
+#else  // !PIPELINED_IMPL
+        friend class Genie;
+#endif  // PIPELINED_IMPL
         friend class Slave;
         friend class PriorityDAG;
 

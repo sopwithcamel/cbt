@@ -60,6 +60,10 @@ namespace cbt {
 
         pthread_mutex_init(&emptyRootNodesMutex_, NULL);
 
+#ifndef PIPELINED_IMPL
+        pthread_mutex_init(&fullRootNodesMutex_, NULL);
+#endif  // !PIPELINED_IMPL
+
 #ifdef ENABLE_COUNTERS
         monitor_ = NULL;
 #endif
@@ -69,6 +73,9 @@ namespace cbt {
         pthread_cond_destroy(&emptyRootAvailable_);
         pthread_mutex_destroy(&emptyRootNodesMutex_);
         pthread_barrier_destroy(&threadsBarrier_);
+#ifndef PIPELINED_IMPL
+        pthread_mutex_destroy(&fullRootNodesMutex_);
+#endif  // !PIPELINED_IMPL
     }
 
     bool CompressTree::bulk_insert(PartialAgg** paos, uint64_t num) {
@@ -83,8 +90,13 @@ namespace cbt {
         for (uint64_t i = 0; i < num; ++i) {
             PartialAgg* agg = paos[i];
             if (inputNode_->isFull()) {
-                // add inputNode_ to be sorted
+#ifdef PIPELINED_IMPL
                 inputNode_->schedule(SORT);
+#else  // !PIPELINED_IMPL
+                // add inputNode_ to full root queue
+                queueFullRootNode(inputNode_);
+                submitNextRootNode();
+#endif  // PIPELINED_IMPL
 
                 // get an empty root. This function can block until there are
                 // empty roots available
@@ -218,7 +230,11 @@ namespace cbt {
         fprintf(stderr, "Starting to flush\n");
 
         emptyType_ = ALWAYS;
+#ifdef PIPELINED_IMPL
         inputNode_->schedule(SORT);
+#else  // !PIPELINED_IMPL
+        queueFullRootNode(inputNode_);
+#endif  // PIPELINED_IMPL
 
         int all_done;
         do {
@@ -283,6 +299,7 @@ namespace cbt {
             if (newLeaf && newLeaf->isFull()) {
                 l2 = newLeaf->splitLeaf();
             }
+#ifdef PIPELINED_IMPL
             node->schedule(COMPRESS);
             if (newLeaf) {
                 newLeaf->schedule(COMPRESS);
@@ -293,6 +310,19 @@ namespace cbt {
             if (l2) {
                 l2->schedule(COMPRESS);
             }
+#else  // !PIPELINED_IMPL
+            node->buffer_.compress();
+            if (newLeaf) {
+                newLeaf->buffer_.compress();
+            }
+            if (l1) {
+                l1->buffer_.compress();
+            }
+            if (l2) {
+                l2->buffer_.compress();
+            }
+#endif  // PIPELINED_IMPL
+
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
                     node->id_);
@@ -361,6 +391,38 @@ namespace cbt {
         addEmptyRootNode(n);
     }
 
+#ifndef PIPELINED_IMPL
+    void CompressTree::queueFullRootNode(Node* n) {
+        pthread_mutex_lock(&fullRootNodesMutex_);
+        fullRootNodes_.push_back(n);
+        pthread_mutex_unlock(&fullRootNodesMutex_);
+    }
+
+    void CompressTree::submitNextRootNode() {
+        Node* n = NULL;
+        if (!rootNodeAvailable())
+            return;
+        pthread_mutex_lock(&fullRootNodesMutex_);
+        if (!fullRootNodes_.empty()) {
+            n = fullRootNodes_.front();
+            fullRootNodes_.pop_front();
+        }
+        pthread_mutex_unlock(&fullRootNodesMutex_);
+
+        // swap n and rootNode_ (which has just been emptied)
+        if (n) {
+            Buffer temp;
+            temp.lists_ = rootNode_->buffer_.lists_;
+            rootNode_->buffer_.lists_ = n->buffer_.lists_;
+            rootNode_->schedule(SORT);
+
+            n->buffer_.lists_ = temp.lists_;
+            temp.clear();
+            addEmptyRootNode(n);
+        }
+    }
+#endif  // !PIPELINED_IMPL
+
     void CompressTree::startThreads() {
         // create root node; initially a leaf
         rootNode_ = new Node(this, 0);
@@ -393,14 +455,20 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
+        // One for the inserter
+        uint32_t threadCount = 1;
+#ifdef PIPELINED_IMPL
         uint32_t mergerThreadCount = 4;
         uint32_t compressorThreadCount = 4;
         uint32_t emptierThreadCount = 4;
         uint32_t sorterThreadCount = 4;
+        threadCount += (mergerThreadCount + compressorThreadCount +
+                emptierThreadCount + sorterThreadCount);
+#else  // !PIPELINED_IMPL
+        uint32_t genieThreadCount = 4;
+        threadCount += genieThreadCount;
+#endif // PIPELINED_IMPL
 
-        // One for the inserter
-        uint32_t threadCount = mergerThreadCount + compressorThreadCount +
-                emptierThreadCount + sorterThreadCount + 1;
 #ifdef ENABLE_PAGING
         uint32_t pagerThreadCount = 1;
         threadCount += pagerThreadCount;
@@ -412,6 +480,7 @@ namespace cbt {
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
         sem_init(&sleepSemaphore_, 0, threadCount - 1);
 
+#ifdef PIPELINED_IMPL
         sorter_ = new Sorter(this);
         sorter_->startThreads(sorterThreadCount);
 
@@ -433,6 +502,10 @@ namespace cbt {
         monitor_ = new Monitor(this);
         monitor_->startThreads(monitorThreadCount);
 #endif
+#else  // !PIPELINED_IMPL
+        genie_ = new Genie(this);
+        genie_->startThreads(genieThreadCount);
+#endif  // PIPELINED_IMPL
 
         pthread_barrier_wait(&threadsBarrier_);
         threadsStarted_ = true;
@@ -441,6 +514,7 @@ namespace cbt {
     void CompressTree::stopThreads() {
         delete inputNode_;
 
+#ifdef PIPELINED_IMPL
         merger_->stopThreads();
         sorter_->stopThreads();
         emptier_->stopThreads();
@@ -451,6 +525,9 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
         monitor_->stopThreads();
 #endif
+#else  // !PIPELINED_IMPL
+        genie_->stopThreads();
+#endif  // PIPELINED_IMPL
         threadsStarted_ = false;
     }
 

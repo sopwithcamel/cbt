@@ -263,6 +263,7 @@ namespace cbt {
         // TODO clean up thread state
     }
 
+#ifdef PIPELINED_IMPL
     // Sorter
 
     Sorter::Sorter(CompressTree* tree) :
@@ -386,7 +387,7 @@ namespace cbt {
         bool ret = queue_.insert(node);
         pthread_spin_unlock(&nodesLock_);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to to-empty list: ",
+        fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to genie list: ",
                 node->id_, node->buffer_.numElements(), ret? "True" : "False");
         printElements();
 #endif
@@ -592,5 +593,79 @@ namespace cbt {
     std::string Monitor::getSlaveName() const {
         return "Monitor";
     }
+#endif // ENABLE_COUNTERS
+
+#else // !PIPELINED_IMPL
+    Genie::Genie(CompressTree* tree) :
+            Slave(tree) {
+    }
+
+    Genie::~Genie() {
+    }
+
+    std::string Genie::getSlaveName() const {
+        return "Genie";
+    }
+
+    bool Genie::empty() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = queue_.empty() && allAsleep();
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
+    }
+
+    bool Genie::more() {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = queue_.empty();
+        pthread_spin_unlock(&nodesLock_);
+        return !ret;
+    }
+
+    Node* Genie::getNextNode(bool fromHead) {
+        Node* ret;
+        pthread_spin_lock(&nodesLock_);
+        ret = queue_.pop();
+        pthread_spin_unlock(&nodesLock_);
+        return ret;
+    }
+
+    void Genie::work(Node* n) {
+        bool is_root = n->isRoot();
+
+        n->perform();
+
+        // No other node is dependent on the root. Performing this check also
+        // avoids the problem, where perform() causes the creation of a new
+        // root which is immediately submitted for emptying. In a regular case,
+        // a parent of n would be in the disabled queue, but in this case it is
+        // not.
+        // possibly enable parent etc.
+        pthread_spin_lock(&nodesLock_);
+        queue_.post(n);
+        pthread_spin_unlock(&nodesLock_);
+
+        // handle notifications
+        Action act = n->getQueueStatus();
+        if (act == DECOMPRESS_ONLY)
+            n->done(act);
+    }
+
+    void Genie::addNode(Node* node) {
+        pthread_spin_lock(&nodesLock_);
+        bool ret = queue_.insert(node);
+        pthread_spin_unlock(&nodesLock_);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to genie list: ",
+                node->id_, node->buffer_.numElements(), ret? "True" : "False");
+        printElements();
 #endif
+    }
+
+    void Genie::printElements() {
+        pthread_spin_lock(&nodesLock_);
+        queue_.printElements();
+        pthread_spin_unlock(&nodesLock_);
+    }
+
+#endif  // PIPELINED_IMPL
 }

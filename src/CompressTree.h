@@ -50,6 +50,7 @@ namespace cbt {
     };
 
     class Node;
+#ifdef PIPELINED_IMPL
     class Emptier;
     class Compressor;
     class Merger;
@@ -60,6 +61,9 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
     class Monitor;
 #endif  // ENABLE_COUNTERS
+#else  // !PIPELINED_IMPL
+    class Genie;
+#endif  // PIPELINED_IMPL
 
     class CompressTree {
       public:
@@ -82,6 +86,7 @@ namespace cbt {
         friend class Buffer;
         friend class Node;
         friend class Slave;
+#ifdef PIPELINED_IMPL
         friend class Emptier;
         friend class Merger;
         friend class Pager;
@@ -89,6 +94,10 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
         friend class Monitor;
 #endif
+#else  // !PIPELINED_IMPL
+        friend class Genie;
+#endif  // PIPELINED_IMPL
+
         Node* getEmptyRootNode();
         void addEmptyRootNode(Node* n);
         void submitNodeForEmptying(Node* n);
@@ -101,6 +110,10 @@ namespace cbt {
         void handleFullLeaves();
         void startThreads();
         void stopThreads();
+#ifndef PIPELINED_IMPL
+        void submitNextRootNode();
+        void queueFullRootNode(Node *n);
+#endif  // !PIPELINED_IMPL
 
       private:
         // (a,b)-tree...
@@ -115,6 +128,10 @@ namespace cbt {
         std::deque<Node*> emptyRootNodes_;
         pthread_mutex_t emptyRootNodesMutex_;
         pthread_cond_t emptyRootAvailable_;
+#ifndef PIPELINED_IMPL
+        std::deque<Node*> fullRootNodes_;
+        pthread_mutex_t fullRootNodesMutex_;
+#endif  // !PIPELINED_IMPL
 
         bool allFlush_;
         bool empty_;
@@ -130,6 +147,7 @@ namespace cbt {
         bool threadsStarted_;
         pthread_barrier_t threadsBarrier_;
 
+#ifdef PIPELINED_IMPL
         Emptier* emptier_;
         Sorter* sorter_;
         Merger* merger_;
@@ -141,6 +159,9 @@ namespace cbt {
 #ifdef ENABLE_COUNTERS
         Monitor* monitor_;
 #endif
+#else  // !PIPELINED_IMPL
+        Genie* genie_;
+#endif  // PIPELINED_IMPL
     };
 }
 

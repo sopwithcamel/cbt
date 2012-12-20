@@ -137,6 +137,7 @@ namespace cbt {
         friend class Node;
     };
 
+#ifdef PIPELINED_IMPL
     class Sorter : public Slave {
       public:
         explicit Sorter(CompressTree* tree);
@@ -245,6 +246,32 @@ namespace cbt {
         uint64_t bctr;
         uint64_t cctr;
     };
-#endif
+#endif  // ENABLE_COUNTERS
+
+#else  // !PIPELINED_IMPL
+    class Genie : public Slave {
+      public:
+        explicit Genie(CompressTree* tree);
+        ~Genie();
+        void work(Node* n);
+        void addNode(Node* node);
+        // Returns true if there are no queued jobs and all threads are
+        // sleeping; false otherwise
+        bool empty();
+
+      protected:
+        // Returns true if there are queued jobs; false otherwise
+        bool more();
+        virtual Node* getNextNode(bool fromHead = true);
+        virtual std::string getSlaveName() const;
+        void printElements();
+
+      private:
+        friend class Node;
+        friend class CompressTree;
+
+        PriorityDAG queue_;
+    };
+#endif  // PIPELINED_IMPL
 }
 #endif  // SRC_SLAVES_H_

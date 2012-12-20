@@ -114,7 +114,11 @@ namespace cbt {
         if (tree_->emptyType_ == ALWAYS || isFull()) {
             ret = spillBuffer();
         } else {
+#ifdef PIPELINED_IMPL
             schedule(COMPRESS);
+#else  // !PIPELINED_IMPL
+            buffer_.compress();
+#endif  // PIPELINED_IMPL
         }
         return ret;
     }
@@ -145,7 +149,11 @@ namespace cbt {
                         %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
+#ifdef PIPELINED_IMPL
                 schedule(COMPRESS);
+#else  // !PIPELINED_IMPL
+                buffer_.compress();
+#endif  // PIPELINED_IMPL
             }
             return true;
         }
@@ -492,6 +500,7 @@ namespace cbt {
     }
 
     void Node::done(const Action& act) {
+#ifdef PIPELINED_IMPL
         switch(act) {
             case COMPRESS:
             case DECOMPRESS:
@@ -521,9 +530,25 @@ namespace cbt {
                 }
                 break;
         }
+#else  // !PIPELINED_IMPL
+        switch(act) {
+            case DECOMPRESS_ONLY:
+                {
+                    setQueueStatus(NONE);
+                    // Signal that we're done comp/decomp
+                    pthread_mutex_unlock(&compMutex_);
+                    pthread_cond_signal(&compCond_);
+                    pthread_mutex_unlock(&compMutex_);
+                }
+                break;
+            default:
+                break;
+        }
+#endif  // PIPELINED_IMPL
     }
 
     void Node::schedule(const Action& act) {
+#ifdef PIPELINED_IMPL
         switch(act) {
             case COMPRESS:
             case DECOMPRESS:
@@ -581,6 +606,27 @@ namespace cbt {
                 }
                 break;
         }
+#else  // !PIPELINED_IMPL
+        switch(act) {
+            case COMPRESS:
+            case DECOMPRESS_ONLY:
+            case DECOMPRESS:
+            case SORT:
+                {
+                    setQueueStatus(act);
+                    tree_->genie_->addNode(this);
+                    tree_->genie_->wakeup();
+                }
+                break;
+            case MERGE:
+            case EMPTY:
+            case NONE:
+                {
+                    assert(false);
+                }
+                break;
+        }
+#endif  // PIPELINED_IMPL
     }
 
     bool Node::checkCompress() {
@@ -682,6 +728,7 @@ namespace cbt {
 
     void Node::perform() {
         Action act = getQueueStatus();
+#ifdef PIPELINED_IMPL
         switch (act) {
             case COMPRESS:
             case DECOMPRESS:
@@ -754,6 +801,35 @@ namespace cbt {
                 }
                 break;
         }
+#else  // !PIPELINED_IMPL
+        switch (act) {
+            case COMPRESS:  // during reading of leaves finally
+                buffer_.compress();
+                break;
+            case DECOMPRESS_ONLY: // during reading of leaves finally 
+                buffer_.decompress();
+                break;
+            case DECOMPRESS:  // emptying a non-root node
+                assert(!isRoot());
+                buffer_.decompress();
+                mergeBuffer();
+                aggregateBuffer(MERGE);
+                emptyBuffer();
+                if (isLeaf())
+                    tree_->handleFullLeaves();
+                setQueueStatus(NONE);
+                break;
+            case SORT:  // emptying a root
+                sortBuffer();
+                aggregateBuffer(SORT);
+                emptyBuffer();
+                if (isLeaf())
+                    tree_->handleFullLeaves();
+                setQueueStatus(NONE);
+                tree_->submitNextRootNode();
+                break;
+        }
+#endif  // PIPELINED_IMPL
     }
 
 #ifdef ENABLE_PAGING

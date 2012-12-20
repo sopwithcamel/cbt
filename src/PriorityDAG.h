@@ -84,7 +84,11 @@ namespace cbt {
             uint32_t i, s = n->children_.size();
             std::set<uint32_t>* d = new std::set<uint32_t>();
             for (i = 0; i < s; ++i) {
+#ifdef PIPELINED_IMPL
                 if (n->children_[i]->getQueueStatus() < COMPRESS) {
+#else  // !PIPELINED_IMPL
+                if (n->children_[i]->getQueueStatus() != NONE) {
+#endif  // PIPELINED_IMPL
                     canEmpty = false;
                     d->insert(n->children_[i]->id());
                 }
@@ -124,9 +128,14 @@ namespace cbt {
         void post(Node* n) {
             // If parent is present, it must be in the disabled queue.
             // remove n from its parent's dependency list
+#ifdef PIPELINED_IMPL
             if (n->parent_ && n->parent_->getQueueStatus() == EMPTY) {
-                std::set<uint32_t>* ch = disabNodes_[n->parent_];
-                if (ch) {
+#else  // !PIPELINED_IMPL
+            if (n->parent_ && n->parent_->getQueueStatus() != NONE) {
+#endif  // PIPELINED_IMPL
+                DisabledDAG::iterator parent_it = disabNodes_.find(n->parent_);
+                if (parent_it != disabNodes_.end()) {
+                    std::set<uint32_t>* ch = parent_it->second;
                     std::set<uint32_t>::iterator it = ch->find(n->id());
                     if (it != ch->end()) { // found
                         ch->erase(it);
@@ -138,6 +147,9 @@ namespace cbt {
                         np->node = n->parent_;
                         np->prio = n->parent_->level();
                         enabNodes_.push(np);
+#ifdef CT_NODE_DEBUG
+                        fprintf(stderr, "Node %d enabled\n", np->node->id());
+#endif  // CT_NODE_DEBUG
 
                         delete ch;
                         DisabledDAG::iterator t = disabNodes_.find(n->parent_);
@@ -164,7 +176,7 @@ namespace cbt {
                     fprintf(stderr, "%d(%d), ", it->node->id(), it->prio);
             }
 */
-            fprintf(stderr, ", DIS: ");
+            fprintf(stderr, ", DIS: %ld els: ", disabNodes_.size());
             for (DisabledDAG::iterator it = disabNodes_.begin();
                     it != disabNodes_.end(); ++it) {
                 if (it->first->isRoot()) {
