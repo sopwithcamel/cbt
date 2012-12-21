@@ -179,6 +179,9 @@ namespace cbt {
 
         /* Pointers to children */
         std::vector<Node*> children_;
+#ifndef PIPELINED_IMPL
+        pthread_spinlock_t children_lock_;
+#endif  // PIPELINED_IMPL
         uint32_t separator_;
 
         // Queueing related status, condition variables and mutexes

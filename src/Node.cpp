@@ -62,6 +62,10 @@ namespace cbt {
         pthread_mutex_init(&pageMutex_, NULL);
         pthread_cond_init(&pageCond_, NULL);
 #endif  // ENABLE_PAGING
+
+#ifndef PIPELINED_IMPL
+        pthread_spin_init(&children_lock_, PTHREAD_PROCESS_PRIVATE);
+#endif  // PIPELINED_IMPL
     }
 
     Node::~Node() {
@@ -75,6 +79,10 @@ namespace cbt {
         pthread_cond_destroy(&pageCond_);
         buffer_.cleanupPaging();
 #endif  // ENABLE_PAGING
+
+#ifndef PIPELINED_IMPL
+        pthread_spin_destroy(&children_lock_);
+#endif  // PIPELINED_IMPL
     }
 
     bool Node::insert(PartialAgg* agg) {
@@ -158,6 +166,9 @@ namespace cbt {
             return true;
         }
 
+#ifndef PIPELINED_IMPL
+        pthread_spin_lock(&children_lock_);
+#endif  // PIPELINED_IMPL
         if (buffer_.empty()) {
             for (curChild = 0; curChild < children_.size(); curChild++) {
                 children_[curChild]->emptyOrCompress();
@@ -266,6 +277,9 @@ namespace cbt {
         if (children_.size() > tree_->b_) {
             splitNonLeaf();
         }
+#ifndef PIPELINED_IMPL
+        pthread_spin_unlock(&children_lock_);
+#endif  // PIPELINED_IMPL
         return true;
     }
 
@@ -385,7 +399,7 @@ namespace cbt {
         l->size_ = num_bytes;
 #else  // !STRUCTURED_BUFFER
         Buffer::List* l;
-        if (buffer_.lists_.size() == 0)
+        if (buffer_.lists_.size() == 0 || buffer_.lists_[0] == parent_list)
             l = buffer_.addList();
         else
             l = buffer_.lists_[0];
@@ -401,7 +415,7 @@ namespace cbt {
         l->num_ += num;
         l->size_ += num_bytes;
 #endif  // STRUCTURED_BUFFER
-        checkSerializationIntegrity(buffer_.lists_.size()-1);
+        checkIntegrity();
         return true;
     }
 
@@ -409,6 +423,9 @@ namespace cbt {
         uint32_t i;
         // insert separator value
 
+#ifndef PIPELINED_IMPL
+        pthread_spin_lock(&children_lock_);
+#endif  // PIPELINED_IMPL
         // find position of insertion
         std::vector<Node*>::iterator it = children_.begin();
         for (i = 0; i < children_.size(); ++i) {
@@ -418,6 +435,9 @@ namespace cbt {
         }
         it += i;
         children_.insert(it, newNode);
+#ifndef PIPELINED_IMPL
+        pthread_spin_unlock(&children_lock_);
+#endif  // PIPELINED_IMPL
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node: %d: Node %d added at pos %u, [", id_,
                 newNode->id_, i);
@@ -838,11 +858,11 @@ namespace cbt {
                 break;
             case DECOMPRESS:  // emptying a non-root node
                 assert(!isRoot());
-                buffer_.decompress();
 #ifdef STRUCTURED_BUFFER
+                buffer_.decompress();
                 mergeBuffer();
                 aggregateBuffer(MERGE);
-#else  // STRUCTURED_BUFFER
+#else  // !STRUCTURED_BUFFER
                 sortBuffer();
                 aggregateBuffer(SORT);
 #endif  // STRUCTURED_BUFFER
@@ -931,32 +951,10 @@ namespace cbt {
 
     bool Node::checkIntegrity() {
 #ifdef ENABLE_INTEGRITY_CHECK
-        uint32_t offset;
-        offset = 0;
-        for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {
-            Buffer::List* l = buffer_.lists_[j];
-            for (uint32_t i = 0; i < l->num_-1; ++i) {
-                if (l->hashes_[i] > l->hashes_[i+1]) {
-                    fprintf(stderr, "Node: %d, List: %d: Hash %u at index %u\
-                            greater than hash %u at %u (size: %u)\n", id_, j,
-                            l->hashes_[i], i, l->hashes_[i+1],
-                            i+1, l->num_);
-                    assert(false);
-                }
-            }
-            for (uint32_t i = 0; i < l->num_; ++i) {
-                if (l->sizes_[i] == 0) {
-                    fprintf(stderr, "Element %u in list %u has 0 size; tot\
-                            size: %u\n", i, j, l->num_);
-                    assert(false);
-                }
-            }
-            if (l->hashes_[l->num_-1] >= separator_) {
-                fprintf(stderr, "Node: %d: Hash %u at index %u\
-                        greater than separator %u\n", id_,
-                        l->hashes_[l->num_-1], l->num_-1, separator_);
-                assert(false);
-            }
+        Buffer::List* l = buffer_.lists_[0];
+        for (uint32_t i = 0; i < l->num_; ++i) {
+            assert(l->hashes_[i] > 0);
+            assert(l->sizes_[i] > 0);
         }
 #endif
         return true;
