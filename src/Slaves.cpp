@@ -285,7 +285,11 @@ namespace cbt {
     }
 
     void Sorter::addNode(Node* node) {
-        addNodeToQueue(node, node->level());
+#ifdef PRIORITIZED_QUEUEING
+            addNodeToQueue(node, /*priority=*/node->level());
+#else  // PRIORITIZED_QUEUEING
+            addNodeToQueue(node, /*priority=*/0);
+#endif  // PRIORITIZED_QUEUEING
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
                 node->id_, node->buffer_.numElements());
@@ -464,7 +468,11 @@ namespace cbt {
 #ifdef ENABLE_PAGING
             node->scheduleBufferPageAction(Buffer::PAGE_IN);
 #endif  // ENABLE_PAGING
+#ifdef PRIORITIZED_QUEUEING
             addNodeToQueue(node, /*priority=*/node->level());
+#else  // PRIORITIZED_QUEUEING
+            addNodeToQueue(node, /*priority=*/0);
+#endif  // PRIORITIZED_QUEUEING
         }
 
 #ifdef CT_NODE_DEBUG
@@ -506,7 +514,11 @@ namespace cbt {
     void Merger::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
-            addNodeToQueue(node, node->level());
+#ifdef PRIORITIZED_QUEUEING
+            addNodeToQueue(node, /*priority=*/node->level());
+#else  // PRIORITIZED_QUEUEING
+            addNodeToQueue(node, /*priority=*/0);
+#endif  // PRIORITIZED_QUEUEING
 
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",

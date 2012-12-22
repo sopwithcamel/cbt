@@ -99,7 +99,11 @@ namespace cbt {
     
                 NodeInfo* ni = new NodeInfo();
                 ni->node = n;
+#ifdef PRIORITIZED_QUEUEING
                 ni->prio = n->level();
+#else  // PRIORITIZED_QUEUEING
+                ni->prio = 0;
+#endif  // PRIORITIZED_QUEUEING
                 enabNodes_.push(ni);
             } else { // disabled queue
                 disabNodes_[n] = d; 
@@ -145,7 +149,11 @@ namespace cbt {
                     if (ch->empty()) {
                         NodeInfo* np = new NodeInfo();
                         np->node = n->parent_;
+#ifdef PRIORITIZED_QUEUEING
                         np->prio = n->parent_->level();
+#else  // PRIORITIZED_QUEUEING
+                        np->prio = 0;
+#endif  // PRIORITIZED_QUEUEING
                         enabNodes_.push(np);
 #ifdef CT_NODE_DEBUG
                         fprintf(stderr, "Node %d enabled\n", np->node->id());
