@@ -827,6 +827,8 @@ namespace cbt {
 
     bool Buffer::checkIntegrity() {
 #ifdef ENABLE_INTEGRITY_CHECK
+        if (lists_.size() == 0)
+            return true;
         List* l = lists_[0];
         for (uint32_t i = 0; i < l->num_; ++i) {
             assert(l->hashes_[i] > 0);
@@ -838,6 +840,8 @@ namespace cbt {
 
     bool Buffer::checkSortIntegrity() {
 #ifdef ENABLE_INTEGRITY_CHECK
+        if (lists_.size() == 0)
+            return true;
         List* l = lists_[0];
         for (uint32_t i = 0; i < l->num_; ++i) {
             assert(l->hashes_[i] > 0);
