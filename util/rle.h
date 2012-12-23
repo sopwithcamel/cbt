@@ -38,4 +38,4 @@ namespace rle {
     }
 };
 
-#endif
+#endif  // RLE_H
