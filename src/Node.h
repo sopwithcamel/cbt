@@ -134,7 +134,6 @@ namespace cbt {
         /* Split non-leaf node; must be called with the buffer decompressed
          * and sorted. If called on the root, then a new root is created */
         bool splitNonLeaf();
-        bool checkIntegrity();
         bool checkSerializationIntegrity(int listn=-1);
         /* Compression-related functions */
 

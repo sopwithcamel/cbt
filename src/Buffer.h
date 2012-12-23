@@ -168,6 +168,9 @@ namespace cbt {
           PageAction getPageAction();
 #endif  // ENABLE_PAGING
 
+          bool checkIntegrity();
+          bool checkSortIntegrity();
+
         private:
           const Node* node_;
           /* buffer fragments */

@@ -376,7 +376,7 @@ namespace cbt {
 
         // quicksort elements
 //        quicksort(0, num - 1);
-        radixsort(0, num - 1, 24);
+        radixsort(0, num, 24);
         return true;
     }
 
@@ -549,6 +549,10 @@ namespace cbt {
             // allocate memory for one list
             Buffer compressed;
 
+#ifndef STRUCTURED_BUFFER
+            assert(lists_.size() == 1);
+#endif  // STRUCTURED_BUFFER
+
             for (uint32_t i = 0; i < lists_.size(); ++i) {
                 Buffer::List* l = lists_[i];
                 if (l->state_ == Buffer::List::COMPRESSED)
@@ -570,12 +574,12 @@ namespace cbt {
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->sizes_),
                         &l->c_sizelen_);
-#else
+#else  // ENABLE_SPECIALIZED_COMPRESSION
                 compsort::compress(l->hashes_, l->num_,
                         cl->hashes_, (uint32_t&)l->c_hashlen_);
                 rle::encode(l->sizes_, l->num_, cl->sizes_,
                         (uint32_t&)l->c_sizelen_);
-#endif
+#endif  // ENABLE_SPECIALIZED_COMPRESSION
                 snappy::RawCompress(l->data_, l->size_,
                         cl->data_,
                         &l->c_datalen_);
@@ -638,6 +642,7 @@ namespace cbt {
 #endif  // CT_NODE_DEBUG
         }
 #endif  // ENABLE_COMPRESSION
+        checkIntegrity();
         return true;
     }
 
@@ -819,4 +824,27 @@ namespace cbt {
         return pageAct_;
     }
 #endif  // ENABLE_PAGING
+
+    bool Buffer::checkIntegrity() {
+#ifdef ENABLE_INTEGRITY_CHECK
+        List* l = lists_[0];
+        for (uint32_t i = 0; i < l->num_; ++i) {
+            assert(l->hashes_[i] > 0);
+            assert(l->sizes_[i] > 0);
+        }
+#endif
+        return true;
+    }
+
+    bool Buffer::checkSortIntegrity() {
+#ifdef ENABLE_INTEGRITY_CHECK
+        List* l = lists_[0];
+        for (uint32_t i = 0; i < l->num_; ++i) {
+            assert(l->hashes_[i] > 0);
+            assert(l->sizes_[i] > 0);
+            if (i < l->num_ - 1)
+                assert(l->hashes_[i] <= l->hashes_[i+1]);
+        }
+#endif
+    }
 }

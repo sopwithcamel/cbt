@@ -186,7 +186,7 @@ namespace cbt {
                     fprintf(stderr,
                             "Node: %d: Can't place %u among children\n", id_,
                             l->hashes_[curElement]);
-                    checkIntegrity();
+                    buffer_.checkIntegrity();
                     assert(false);
                 }
 #endif
@@ -285,19 +285,19 @@ namespace cbt {
 
     bool Node::sortBuffer() {
         bool ret = buffer_.sort();
-        checkIntegrity();
+        buffer_.checkSortIntegrity();
         return ret;
     }
 
     bool Node::aggregateBuffer(const Action& act) {
         bool ret = buffer_.aggregate(act == SORT? true : false);
-        checkIntegrity();
+        buffer_.checkSortIntegrity();
         return ret;
     }
 
     bool Node::mergeBuffer() {
         bool ret = buffer_.merge();
-        checkIntegrity();
+        buffer_.checkSortIntegrity();
         return ret;
     }
 
@@ -305,7 +305,7 @@ namespace cbt {
      * new leaf and inserting a median value as the separator element into the
      * parent */
     Node* Node::splitLeaf() {
-        checkIntegrity();
+        buffer_.checkSortIntegrity();
 
         // select splitting index
         uint32_t num = buffer_.numElements();
@@ -337,8 +337,8 @@ namespace cbt {
         l = buffer_.lists_[0];
 
         // check integrity of both leaves
-        newLeaf->checkIntegrity();
-        checkIntegrity();
+        newLeaf->buffer_.checkSortIntegrity();
+        buffer_.checkSortIntegrity();
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d splits to Node %d: new indices: %u and\
                 %u; new separators: %u and %u\n", id_, newLeaf->id_,
@@ -415,7 +415,7 @@ namespace cbt {
         l->num_ += num;
         l->size_ += num_bytes;
 #endif  // STRUCTURED_BUFFER
-        checkIntegrity();
+        buffer_.checkIntegrity();
         return true;
     }
 
@@ -945,17 +945,6 @@ namespace cbt {
             }
         }
         tree_->destroyPAO_(pao);
-#endif
-        return true;
-    }
-
-    bool Node::checkIntegrity() {
-#ifdef ENABLE_INTEGRITY_CHECK
-        Buffer::List* l = buffer_.lists_[0];
-        for (uint32_t i = 0; i < l->num_; ++i) {
-            assert(l->hashes_[i] > 0);
-            assert(l->sizes_[i] > 0);
-        }
 #endif
         return true;
     }
