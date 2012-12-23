@@ -441,7 +441,11 @@ namespace cbt {
         inputNode_->buffer_.setPageable(false);
 #endif  // ENABLE_PAGING
 
+#ifdef MULTIBUFFERED_ROOT
         uint32_t number_of_root_nodes = 4;
+#else  // !MULTIBUFFERED_ROOT/
+        uint32_t number_of_root_nodes = 1;
+#endif  // MULTIBUFFERED_ROOT
         for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
             Node* n = new Node(this, 0);
             n->buffer_.addList();
@@ -465,7 +469,7 @@ namespace cbt {
         threadCount += (mergerThreadCount + compressorThreadCount +
                 emptierThreadCount + sorterThreadCount);
 #else  // !PIPELINED_IMPL
-        uint32_t genieThreadCount = 4;
+        uint32_t genieThreadCount = 1;
         threadCount += genieThreadCount;
 #endif // PIPELINED_IMPL
 
