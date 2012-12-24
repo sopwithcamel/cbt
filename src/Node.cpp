@@ -356,13 +356,13 @@ namespace cbt {
         // allocate a new List in the buffer and copy data into it
         Buffer::List* l = buffer_.addList();
         // memset(l->hashes_, 0, num * sizeof(uint32_t));
-        memmove(l->hashes_, parent_list->hashes_ + index,
+        memcpy(l->hashes_, parent_list->hashes_ + index,
                 num * sizeof(uint32_t));
         // memset(l->sizes_, 0, num * sizeof(uint32_t));
-        memmove(l->sizes_, parent_list->sizes_ + index,
+        memcpy(l->sizes_, parent_list->sizes_ + index,
                 num * sizeof(uint32_t));
         // memset(l->data_, 0, num_bytes);
-        memmove(l->data_, parent_list->data_ + offset,
+        memcpy(l->data_, parent_list->data_ + offset,
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;

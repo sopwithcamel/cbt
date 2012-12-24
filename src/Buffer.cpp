@@ -481,7 +481,7 @@ namespace cbt {
                 // the size wouldn't have changed
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
                 //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-                memmove(a->data_ + a->size_,
+                memcpy(a->data_ + a->size_,
                         reinterpret_cast<void*>(perm_[lastIndex]),
                         l->sizes_[lastIndex]);
                 a->size_ += l->sizes_[lastIndex];
@@ -505,7 +505,7 @@ namespace cbt {
             // the size wouldn't have changed
             a->sizes_[a->num_] = l->sizes_[lastIndex];
             // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-            memmove(a->data_ + a->size_,
+            memcpy(a->data_ + a->size_,
                     reinterpret_cast<void*>(perm_[lastIndex]),
                     l->sizes_[lastIndex]);
             a->size_ += l->sizes_[lastIndex];
