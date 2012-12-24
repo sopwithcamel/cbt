@@ -8,13 +8,21 @@
 #include <stdlib.h>
 #include <math.h>
 
+#define LSK_BITMASK(K) (uint32_t)(((uint64_t)1 << (K)) - 1)
+
 using namespace std;
 
 namespace compsort {
 
-    inline uint32_t get_least_sig_k_bitmask(uint32_t k)
-    {
-        return ((1<<k) - 1);
+    inline uint32_t nlz(uint32_t x) {
+        if (x == 0) return(32);
+        uint32_t n = 0;
+        if (x <= 0x0000ffff) {n = n +16; x = x <<16;}
+        if (x <= 0x00ffffff) {n = n + 8; x = x << 8;}
+        if (x <= 0x0fffffff) {n = n + 4; x = x << 4;}
+        if (x <= 0x3fffffff) {n = n + 2; x = x << 2;}
+        if (x <= 0x7fffffff) {n = n + 1;}
+        return n;
     }
 
     /* Each 32 bit unsigned integer is stored as follows:
@@ -34,16 +42,27 @@ namespace compsort {
             if (data[i] < min) min = data[i];
             if (data[i] > max) max = data[i];
         }
-        k = floor(log2((max + min) / 2)) + 1;
+//        k = floor(log2((max + min) / 2)) + 1;
+//        k = 16;
+        uint32_t rand_el = data[rand() % len];
+        asm("bsrl %1,%0" : "=r"(k) : "r"(rand_el)); ++k;
+
         *last_word = k; last_word++; // store k as first element since we need it later
         last_word++; // leave another space for storing offset in the final word
         *last_word = 0;
 
         for (uint32_t i=0; i<len; ++i) {
             uint32_t n = data[i];
-            int32_t m = (n > 0? floor(log2(n)) + 1: 1); // number of bits reqd.
+//            int32_t m = (n > 0? floor(log2(n)) + 1: 1); // number of bits reqd.
+            int32_t m;
+            if (n == 0)
+                m = 1;
+            else {
+                asm("bsrl %1,%0" : "=r"(m) : "r"(n));
+                ++m;
+            }
             while (m > 0) {
-                uint32_t bm = get_least_sig_k_bitmask(k);
+                uint32_t bm = LSK_BITMASK(k);
                 uint32_t x = n & bm;
                 n >>= k;
                 m -= k;
@@ -67,7 +86,7 @@ namespace compsort {
                     *last_word = 0;
 
                     // get remaining bits
-                    y = x & get_least_sig_k_bitmask(k+1-a);
+                    y = x & LSK_BITMASK(k+1-a);
                     y <<= (32 - (k+1-a));
                     *last_word |= y;
                     a = 32 - (k+1-a);
@@ -93,27 +112,33 @@ namespace compsort {
             uint32_t n = data[i];
             uint32_t a = 32; // number of bits remaining in current word
             bool of;
+            // while we can satisfy the next 'fragment' from the current word
             while (a >= k+1) {
-                uint32_t num_bits_read;
+                uint32_t num_bits_to_read;
                 if (rem > 0) { // we have a partial fragment from before
                     // read rem bits
-                    num_bits_read = rem;
-                    uint32_t rembm = get_least_sig_k_bitmask(rem);
+                    num_bits_to_read = rem;
+                    uint32_t rembm = LSK_BITMASK(rem);
                     uint32_t y = (n >> (a-rem)) & rembm;
                     x |= y;
-                    rem = 0;
-                } else {
-                    // extract next k+1 bits from n
-                    num_bits_read = k+1;
-                    uint32_t bm = get_least_sig_k_bitmask(k+1);
+                } else { // we're beginning a new fragment
+                    // extract next k+1 bits from n into x
+                    num_bits_to_read = k + 1;
+                    uint32_t bm = LSK_BITMASK(k + 1);
+                    assert(bm > 0);
                     x = (n >> (a-(k+1))) & bm;
                 }
+                // now x contains an entire (k+1)-length fragment, so we set
+                // rem to 0, since we don't need any bits to complete this
+                // fragment
+                rem = 0;
                 of = ((x & 1) == 1);
                 x >>= 1; // get rid of overflow bit
+
                 x <<= b;
                 cur |= x;
                 b += k;
-                a -= num_bits_read;
+                a -= num_bits_to_read;
                 if (!of) {
                     out[out_len++] = cur;
                     cur = 0;
@@ -122,12 +147,15 @@ namespace compsort {
                 if (i == len-1 && a == 32-finoff)
                     goto exit_loop;
             }
-            // get LS a bits
-            uint32_t bm = get_least_sig_k_bitmask(a);
-            x = n & bm;
-            rem = (k+1-a);
-            x <<= rem; // make space for remaining bits
-            assert(rem > 0);
+            // if we still have some bits remaining, we start the next fragment
+            if (a > 0) {
+                // get LS a bits
+                uint32_t bm = LSK_BITMASK(a);
+                x = n & bm;
+                rem = (k+1-a);
+                x <<= rem; // make space for remaining bits
+                assert(rem > 0);
+            }
         }
 exit_loop:
         if (rem != 0) {
@@ -139,4 +167,4 @@ exit_loop:
     }
 };
 
-#endif
+#endif  // COMPSORT_H
