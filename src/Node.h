@@ -58,11 +58,40 @@ namespace cbt {
             pthread_spin_destroy(&lock_);
         }
 
-        bool isset(const NodeState& state) const;
-        void clear();
-        void set(const NodeState& state);
-        void unset(const NodeState& state);
-        bool zero() const;
+        bool isset(const NodeState& state) {
+            uint32_t a = 1 << state;
+            pthread_spin_lock(&lock_);
+            bool ret = a & mask_;
+            pthread_spin_unlock(&lock_);
+            return (ret == 0);
+        }
+
+        void clear() {
+            pthread_spin_lock(&lock_);
+            mask_ = 0;
+            pthread_spin_unlock(&lock_);
+        }
+
+        void set(const NodeState& state) {
+            uint32_t a = 1 << state;
+            pthread_spin_lock(&lock_);
+            mask_ = a | mask_;
+            pthread_spin_unlock(&lock_);
+        }
+
+        void unset(const NodeState& state) {
+            uint32_t a = 0xffffffff - (1 << state);
+            pthread_spin_lock(&lock_);
+            mask_ = a & mask_;
+            pthread_spin_unlock(&lock_);
+        }
+
+        bool zero() {
+            pthread_spin_lock(&lock_);
+            bool ret = mask_;
+            pthread_spin_unlock(&lock_);
+            return (ret == 0);
+        }
       private:
         uint32_t mask_;
         pthread_spinlock_t lock_;
