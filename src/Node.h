@@ -40,21 +40,34 @@ namespace cbt {
     class Compressor;
     class Merger;
 
-    enum Action {
-#ifdef ENABLE_PAGING
-        PAGEIN,
-#endif  // ENABLE_PAGING
-        DECOMPRESS_ONLY,
-        DECOMPRESS,
-        SORT,
-        MERGE,
-        EMPTY,
-        COMPRESS,
-#ifdef ENABLE_PAGING
-        PAGEOUT,
-#endif  // ENABLE_PAGING
-        NONE
+    enum NodeState {
+        DEFAULT = 0,
+        DECOMPRESS = 1,
+        COMPRESS = 2,
+        SORT = 3,
+        MERGE = 4,
+        EMPTY = 5
     };
+
+    struct StateMask {
+      public:
+        StateMask() : mask_(0) {
+            pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
+        }
+        ~StateMask() {
+            pthread_spin_destroy(&lock_);
+        }
+
+        bool isset(const NodeState& state) const;
+        void clear();
+        void set(const NodeState& state);
+        void unset(const NodeState& state);
+        bool zero() const;
+      private:
+        uint32_t mask_;
+        pthread_spinlock_t lock_;
+    };
+
 
     class Node {
         friend class CompressTree;
@@ -106,7 +119,7 @@ namespace cbt {
         /* Merge the buffer based on hash value */
         bool mergeBuffer();
         /* Aggregate the sorted/merged buffer */
-        bool aggregateBuffer(const Action& act);
+        bool aggregateBuffer(const NodeState& act);
         /* copy contents from node's buffer into this buffer. Starting from
          * index = index, copy num elements' data.
          */
@@ -128,12 +141,7 @@ namespace cbt {
         bool splitNonLeaf();
         bool checkIntegrity();
         bool checkSerializationIntegrity(int listn=-1);
-        /* Compression-related functions */
 
-        // return value indicates whether the node needs to be added or
-        // if it's already present in the queue
-        bool checkCompress();
-        bool checkDecompress();
 
         //
         // management of queues
@@ -142,23 +150,29 @@ namespace cbt {
         // action and does not check. For example, perform(MERGE) will directly
         // sort/merge the buffer. The caller has to ensure that the buffer is
         // already decompressed.
-        void perform();
-        // Check if the node is currently queued up for Action act and
-        // block until receipt of signal indicating completion.
-        void wait(const Action& act);
-        // Signal that Action act is complete.
-        void done(const Action& act);
+        void perform(const NodeState& state);
+        // Check if the node is currently scheduled for action state and block
+        // until receipt of signal indicating completion.
+        void wait(const NodeState& state);
+        // Signal that the state waited upon has been reached
+        void done(const NodeState& state);
         // 
-        void schedule(const Action& act);
-        Action getQueueStatus();
-        void setQueueStatus(const Action& act);
+        void schedule(const NodeState& act);
 
-#ifdef ENABLE_PAGING
-        /* Paging-related functions */
-        void scheduleBufferPageAction(const Buffer::PageAction& act);
-        Buffer::PageAction getPageAction();
-#endif  // ENABLE_PAGING
+        // Ugh. This is required because a single compressor queue handles both
+        // compression and decompression. The Slave, unfortunately, needs to
+        // know which of these is being performed, and we don't want to expose
+        // the locking etc. to the Slave.
+        bool canEmptyIntoNode();
+        bool checkScheduleSync(const NodeState& state);
 
+        // Synchronized functions to get and set state and schedule masks.
+        bool setState(uint32_t mask);
+        uint32_t getState() const;
+        bool setSchedule(uint32_t mask);
+        uint32_t getSchedule() const;
+
+      private:
         /* pointer to the tree */
         CompressTree* tree_;
         /* Buffer */
@@ -173,9 +187,10 @@ namespace cbt {
         std::vector<Node*> children_;
         uint32_t separator_;
 
-        // Queueing related status, condition variables and mutexes
-        enum Action queueStatus_;
-        pthread_spinlock_t queueStatusLock_;
+        // Bit-masks that indicate the current state of the node and requested
+        // actions respectively, along with locks to protect them
+        StateMask state_mask_;
+        StateMask schedule_mask_;
 
         pthread_cond_t emptyCond_;
         pthread_mutex_t emptyMutex_;

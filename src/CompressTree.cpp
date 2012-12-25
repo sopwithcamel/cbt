@@ -133,8 +133,8 @@ namespace cbt {
             assert(curLeaf->buffer_.lists_.size() == 1);
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(DECOMPRESS_ONLY);
-            curLeaf->wait(DECOMPRESS_ONLY);
+            curLeaf->schedule(DECOMPRESS);
+            curLeaf->wait(DECOMPRESS);
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -171,8 +171,8 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(DECOMPRESS_ONLY);
-            n->wait(DECOMPRESS_ONLY);
+            n->schedule(DECOMPRESS);
+            n->wait(DECOMPRESS);
             lastOffset_ = 0;
             lastElement_ = 0;
         }
@@ -344,7 +344,7 @@ namespace cbt {
 
     bool CompressTree::rootNodeAvailable() {
         if (!rootNode_->buffer_.empty() ||
-                rootNode_->getQueueStatus() != NONE)
+                !rootNode_->state_mask_.isset(DEFAULT))
             return false;
         return true;
     }
