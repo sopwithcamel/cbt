@@ -542,7 +542,7 @@ namespace cbt {
         }
         a->num_++;
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d aggregated from %u to %u\n", id_,
+        fprintf(stderr, "Node %d aggregated from %u to %u\n", node_->id_,
                 numElements(), aux.numElements());
 #endif
 

@@ -51,7 +51,7 @@ namespace cbt {
 
     struct StateMask {
       public:
-        StateMask() : mask_(0) {
+        StateMask() : mask_(1) {
             pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
         }
         ~StateMask() {
@@ -63,7 +63,7 @@ namespace cbt {
             pthread_spin_lock(&lock_);
             bool ret = a & mask_;
             pthread_spin_unlock(&lock_);
-            return (ret == 0);
+            return (ret != 0);
         }
 
         void clear() {

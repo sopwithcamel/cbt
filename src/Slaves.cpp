@@ -275,11 +275,7 @@ namespace cbt {
     }
 
     void Sorter::work(Node* n) {
-#ifdef CT_NODE_DEBUG
-        assert(n->getQueueStatus() == SORT);
-#endif  // CT_NODE_DEBUG
         n->perform(SORT);
-
         addToSorted(n); 
     }
 
@@ -358,9 +354,6 @@ namespace cbt {
 
     void Emptier::work(Node* n) {
         n->wait(MERGE);
-#ifdef CT_NODE_DEBUG
-        assert(n->getQueueStatus() == EMPTY);
-#endif  // CT_NODE_DEBUG
         bool is_root = n->isRoot();
 
         n->perform(EMPTY);
