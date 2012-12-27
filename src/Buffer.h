@@ -130,6 +130,7 @@ namespace cbt {
           bool performPageAction();
           PageAction getPageAction();
 #endif  // ENABLE_PAGING
+          bool checkSortIntegrity(List* l);
 
         private:
           const Node* node_;

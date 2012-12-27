@@ -118,8 +118,8 @@ namespace cbt {
         if (n < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
-            if (!schedule_mask_.isset(DECOMPRESS) &&
-                    !state_mask_.isset(DECOMPRESS)) {
+            if (!schedule_mask_.is_set(DECOMPRESS) &&
+                    !state_mask_.is_set(DECOMPRESS)) {
                 schedule(DECOMPRESS);
             }
             if (isFull()) {
@@ -377,6 +377,7 @@ namespace cbt {
         l->num_ = num;
         l->size_ = num_bytes;
         checkSerializationIntegrity(buffer_.lists_.size()-1);
+        buffer_.checkSortIntegrity(l);
         return true;
     }
 
@@ -521,9 +522,9 @@ namespace cbt {
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
                         return;
-                    assert(!schedule_mask_.isset(DECOMPRESS) &&
+                    assert(!schedule_mask_.is_set(DECOMPRESS) &&
                             "This can't happen");
-                    if (!schedule_mask_.isset(COMPRESS)) {
+                    if (!schedule_mask_.is_set(COMPRESS)) {
                         schedule_mask_.set(COMPRESS);
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
@@ -534,7 +535,7 @@ namespace cbt {
                     if (!buffer_.compressible_ || buffer_.empty())
                         return;
                     schedule_mask_.unset(COMPRESS);
-                    if (!schedule_mask_.isset(DECOMPRESS)) {
+                    if (!schedule_mask_.is_set(DECOMPRESS)) {
                         schedule_mask_.set(DECOMPRESS);
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
@@ -544,7 +545,7 @@ namespace cbt {
             case SORT:
                 {
                     // add node to sorter
-                    if (!schedule_mask_.isset(SORT)) {
+                    if (!schedule_mask_.is_set(SORT)) {
                         schedule_mask_.set(SORT);
                         tree_->sorter_->addNode(this);
                         tree_->sorter_->wakeup();
@@ -554,7 +555,7 @@ namespace cbt {
             case MERGE:
                 {
                     // add node to merge
-                    if (!schedule_mask_.isset(MERGE)) {
+                    if (!schedule_mask_.is_set(MERGE)) {
                         schedule_mask_.set(MERGE);
                         tree_->merger_->addNode(this);
                         tree_->merger_->wakeup();
@@ -564,7 +565,7 @@ namespace cbt {
             case EMPTY:
                 {
                     // add node to empty
-                    if (!schedule_mask_.isset(EMPTY)) {
+                    if (!schedule_mask_.is_set(EMPTY)) {
                         schedule_mask_.set(EMPTY);
                         tree_->emptier_->addNode(this);
                         tree_->emptier_->wakeup();
@@ -580,7 +581,7 @@ namespace cbt {
             case DECOMPRESS:
                 {
                     pthread_mutex_lock(&compMutex_);
-                    while (!state_mask_.isset(state))
+                    while (schedule_mask_.is_set(state))
                         pthread_cond_wait(&compCond_, &compMutex_);
                     pthread_mutex_unlock(&compMutex_);
                 }
@@ -588,7 +589,7 @@ namespace cbt {
             case MERGE:
                 {
                     pthread_mutex_lock(&sortMutex_);
-                    while (!state_mask_.isset(state))
+                    while (schedule_mask_.is_set(state))
                         pthread_cond_wait(&sortCond_, &sortMutex_);
                     pthread_mutex_unlock(&sortMutex_);
                 }
@@ -596,7 +597,7 @@ namespace cbt {
             case EMPTY:
                 {
                     pthread_mutex_lock(&emptyMutex_);
-                    while (!state_mask_.isset(state))
+                    while (schedule_mask_.is_set(state))
                         pthread_cond_wait(&emptyCond_, &emptyMutex_);
                     pthread_mutex_unlock(&emptyMutex_);
                 }
@@ -626,7 +627,10 @@ namespace cbt {
                 break;
             case MERGE:
                 {
+#ifdef CT_NODE_DEBUG
                     assert(!rootFlag && "Non-root buffer ever sorted");
+                    assert(state_mask_.is_set(DECOMPRESS));
+#endif  // CT_NODE_DEBUG
                     mergeBuffer();
                     aggregateBuffer(MERGE);
                 }
@@ -639,13 +643,18 @@ namespace cbt {
                 }
                 break;
         }
-        // unset from schedule mask and set in state mask
-        schedule_mask_.unset(state);
 
+        // clear the current mask
+        state_mask_.clear();
+
+        // set next state
         if (state == EMPTY)
             state_mask_.set(DEFAULT);
         else
             state_mask_.set(state);
+
+        // unset from schedule mask and set in state mask
+        schedule_mask_.unset(state);
 
         if (state == EMPTY && rootFlag) {
             tree_->sorter_->submitNextNodeForEmptying();
@@ -654,7 +663,12 @@ namespace cbt {
 
     bool Node::canEmptyIntoNode() {
         bool ret = true;
-        // TODO: FIll
+        uint32_t schedule_test_mask = 7;
+        uint32_t state_test_mask = 7;
+        ret &= (schedule_mask_.or_mask(schedule_test_mask) ==
+                schedule_test_mask);        
+        ret &= (state_mask_.or_mask(state_test_mask) ==
+                state_test_mask);        
         return ret;
     }
 
@@ -697,7 +711,7 @@ namespace cbt {
     }
 
     bool Node::checkIntegrity() {
-#ifdef ENABLE_INTEGRITY_CHECK
+#if 0
         uint32_t offset;
         offset = 0;
         for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {

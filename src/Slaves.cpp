@@ -410,7 +410,7 @@ namespace cbt {
 
     void Compressor::work(Node* n) {
         NodeState state;
-        if (!n->schedule_mask_.isset(COMPRESS))
+        if (n->schedule_mask_.is_set(COMPRESS))
             state = COMPRESS;
         else
             state = DECOMPRESS;
@@ -420,13 +420,13 @@ namespace cbt {
 
     void Compressor::addNode(Node* node) {
         NodeState state;
-        if (!node->schedule_mask_.isset(COMPRESS))
+        if (node->schedule_mask_.is_set(COMPRESS))
             state = COMPRESS;
         else
             state = DECOMPRESS;
         if (state == COMPRESS) {
             addNodeToQueue(node, /*priority=*/0);
-        } else { // DECOMPRESS || DECOMPRESS_ONLY
+        } else {
             addNodeToQueue(node, /*priority=*/node->level());
         }
 

@@ -376,11 +376,12 @@ namespace cbt {
 
         // quicksort elements
 //        quicksort(0, num - 1);
-        radixsort(0, num - 1, 24);
+        radixsort(0, num, 24);
         return true;
     }
 
     bool Buffer::merge() {
+
         if (empty())
             return true;
 
@@ -410,6 +411,11 @@ namespace cbt {
         uint32_t* heads = new uint32_t[nlists];
         uint32_t* indices = new uint32_t[nlists];
         uint32_t* offsets = new uint32_t[nlists]; 
+
+#ifdef CT_NODE_DEBUG
+        for (uint32_t i = 0; i < nlists; ++i)
+            checkSortIntegrity(lists_[i]);
+#endif  // CT_NODE_DEBUG
 
         uint32_t num_non_empty_lists = 0;
         for (uint32_t i = 0; i < nlists; ++i) {
@@ -455,6 +461,7 @@ namespace cbt {
                 --num_non_empty_lists;
             }
         }
+        checkSortIntegrity(aux_list_);
         return true;
     }
 
@@ -837,5 +844,20 @@ namespace cbt {
     Buffer::PageAction Buffer::getPageAction() {
         return pageAct_;
     }
+
 #endif  // ENABLE_PAGING
+    bool Buffer::checkSortIntegrity(List* l) {
+#ifdef ENABLE_INTEGRITY_CHECK
+        for (uint32_t i = 0; i < l->num_; ++i) {
+            assert(l->hashes_[i] > 0);
+            assert(l->sizes_[i] > 0);
+            if (i < l->num_ - 1) {
+                if (l->hashes_[i] > l->hashes_[i+1])
+                    assert(false);
+                if (l->sizes_[i] != l->sizes_[i+1])
+                    assert(false);
+            }
+        }
+#endif
+    }
 }

@@ -344,7 +344,7 @@ namespace cbt {
 
     bool CompressTree::rootNodeAvailable() {
         if (!rootNode_->buffer_.empty() ||
-                !rootNode_->state_mask_.isset(DEFAULT))
+                !rootNode_->state_mask_.is_set(DEFAULT))
             return false;
         return true;
     }
@@ -355,6 +355,10 @@ namespace cbt {
         temp.lists_ = rootNode_->buffer_.lists_;
         rootNode_->buffer_.lists_ = n->buffer_.lists_;
         rootNode_->schedule(EMPTY);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Submitting node %d for emptying\n",
+                rootNode_->id());
+#endif  // CT_NODE_DEBUG
 
         n->buffer_.lists_ = temp.lists_;
         temp.clear();
