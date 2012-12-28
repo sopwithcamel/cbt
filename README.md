@@ -13,6 +13,7 @@ cbt
 * [ZeroMQ](http://www.zeromq.org/intro:get-the-software)
 * [libdl](http://www.s-gms.ms.edus.si/cgi-bin/man-cgi?libdl+3LIB)
 * [tcmalloc](http://code.google.com/p/gperftools/)
+* [Google flags](http://code.google.com/p/gflags/)
 
 # Installation on Ubuntu #
 ## For CBT ##
