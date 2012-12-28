@@ -23,7 +23,7 @@ def Utility(target, source, action):
     env.Precious(target)
     return target
 
-src_files = [Glob('src/*.cpp'), Glob('util/*.cpp')]
+src_files = [Glob('src/*.cpp'), Glob('util/*.cpp'), 'util/lz4.c']
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
 

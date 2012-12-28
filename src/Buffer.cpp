@@ -31,6 +31,7 @@
 #include "compsort.h"
 #include "rle.h"
 #include "snappy.h"
+#include "lz4.h"
 
 namespace cbt {
     uint64_t Buffer::List::allocated_lists = 0;
@@ -590,7 +591,7 @@ namespace cbt {
                 // latest added list
                 Buffer::List* cl =
                         compressed.lists_[compressed.lists_.size()-1];
-#ifndef ENABLE_SPECIALIZED_COMPRESSION
+#ifdef SNAPPY_COMPRESSION
                 snappy::RawCompress((const char*)l->hashes_,
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->hashes_),
@@ -599,15 +600,27 @@ namespace cbt {
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->sizes_),
                         &l->c_sizelen_);
+                snappy::RawCompress(l->data_, l->size_,
+                        cl->data_,
+                        &l->c_datalen_);
 #else
+                l->c_hashlen_ = LZ4_compress((const char*)l->hashes_,
+                        reinterpret_cast<char*>(cl->hashes_),
+                        l->num_ * sizeof(uint32_t));
+                l->c_sizelen_ = LZ4_compress((const char*)l->sizes_,
+                        reinterpret_cast<char*>(cl->sizes_),
+                        l->num_ * sizeof(uint32_t));
+                l->c_datalen_ = LZ4_compress(l->data_, cl->data_, l->size_);
+/*
                 compsort::compress(l->hashes_, l->num_,
                         cl->hashes_, (uint32_t&)l->c_hashlen_);
                 rle::encode(l->sizes_, l->num_, cl->sizes_,
                         (uint32_t&)l->c_sizelen_);
-#endif
                 snappy::RawCompress(l->data_, l->size_,
                         cl->data_,
                         &l->c_datalen_);
+*/
+#endif
                 l->deallocate();
                 l->hashes_ = cl->hashes_;
                 l->sizes_ = cl->sizes_;
@@ -637,20 +650,31 @@ namespace cbt {
                 // latest added list
                 Buffer::List* l =
                         decompressed.lists_[decompressed.lists_.size()-1];
-#ifndef ENABLE_SPECIALIZED_COMPRESSION
+#ifdef SNAPPY_COMPRESSION
                 snappy::RawUncompress((const char*)cl->hashes_,
                         cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
                 snappy::RawUncompress((const char*)cl->sizes_,
                         cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
+                snappy::RawUncompress(cl->data_, cl->c_datalen_,
+                        l->data_);
 #else
+                assert(LZ4_uncompress((const char*)cl->hashes_,
+                        reinterpret_cast<char*>(l->hashes_),
+                        cl->num_ * sizeof(uint32_t)) == cl->c_hashlen_);
+                assert(LZ4_uncompress((const char*)cl->sizes_,
+                        reinterpret_cast<char*>(l->sizes_),
+                        cl->num_ * sizeof(uint32_t)) == cl->c_sizelen_);
+                assert(LZ4_uncompress(cl->data_, l->data_, cl->size_) == cl->c_datalen_);
+/*
                 uint32_t siz;
                 compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
                         l->hashes_, siz);
                 rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
                         l->sizes_, siz);
-#endif
                 snappy::RawUncompress(cl->data_, cl->c_datalen_,
                         l->data_);
+*/
+#endif
                 cl->deallocate();
                 cl->hashes_ = l->hashes_;
                 cl->sizes_ = l->sizes_;
@@ -859,5 +883,6 @@ namespace cbt {
             }
         }
 #endif
+        return true;
     }
 }
