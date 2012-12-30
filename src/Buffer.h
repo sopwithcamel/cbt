@@ -116,7 +116,6 @@ namespace cbt {
           bool compress();
           bool decompress();
           void setCompressible(bool flag);
-          void performCompressAction();
 
 #ifdef ENABLE_PAGING
           /* Paging-related */
