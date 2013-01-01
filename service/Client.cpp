@@ -52,13 +52,23 @@ namespace cbtservice {
             kInputDist(d),
             kNumFillers(10000),
             kLettersInAlphabet(26),
-            kMaxPAOs(200000) {
+            kMaxPAOs(200000),
+            kMaxUniquePAOs(10000000) {
         assert(LinkUserMap());
+        recv_paos_ = reinterpret_cast<PartialAgg**>(malloc
+                (sizeof(PartialAgg*) * kMaxUniquePAOs));
+        for (uint32_t i = 0; i < kMaxUniquePAOs; ++i) {
+            to_->createPAO(NULL, &recv_paos_[i]);
+        }
+            
     }
 
     CBTClient::~CBTClient() {
         for (uint32_t i = 0; i < kNumFillers; ++i)
             delete[] fillers_[i];
+        for (uint32_t i = 0; i < kMaxUniquePAOs; ++i)
+            to_->destroyPAO(recv_paos_[i]);
+        delete[] recv_paos_;
     }
 
     void CBTClient::Run() {
@@ -91,9 +101,21 @@ namespace cbtservice {
             paos.clear();
 
             //  Get the reply.
-            zmq::message_t reply;
-            socket.recv(&reply);
-            assert(!strcmp(reinterpret_cast<char*>(reply.data()), "True"));
+            std::string results = s_recv(socket);
+            std::stringstream recv;
+            recv << results;
+            IstreamInputStream* ii = new IstreamInputStream(&recv);
+            CodedInputStream* ci = new CodedInputStream(ii);
+
+            uint32_t rem = results.size();
+            uint32_t num_PAOs = 0;
+            do {
+                assert(static_cast<ProtobufOperations*>(to_)->deserialize(
+                            recv_paos_[num_PAOs], ci));
+                rem -= (to_->getSerializedSize(recv_paos_[num_PAOs]) + 1);
+               ++num_PAOs;
+            } while (rem > 0);
+            fprintf(stderr, "%d results received\n", num_PAOs);
         }
     }
 

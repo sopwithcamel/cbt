@@ -37,6 +37,7 @@ namespace cbtservice {
         static void* CallHelper(void*);
       private:
         const uint32_t kPAOsInsertAtTime;
+        const uint32_t kMaxUniquePAOs;
 
         CBTServer();
         ~CBTServer();
@@ -51,6 +52,7 @@ namespace cbtservice {
         cbt::CompressTree* cbt_;
         Operations* to_;
         PartialAgg** recv_paos_;
+        PartialAgg** send_paos_;
 
         uint64_t total_PAOs_inserted_;
     };

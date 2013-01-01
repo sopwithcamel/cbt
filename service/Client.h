@@ -52,6 +52,7 @@ namespace cbtservice {
         const uint32_t kNumFillers;
         const uint32_t kLettersInAlphabet;
         const uint32_t kMaxPAOs;
+        const uint32_t kMaxUniquePAOs;
 
         float Conv26(float x) {
             return x * log(2)/log(26);
@@ -71,6 +72,9 @@ namespace cbtservice {
         void DeletePAOs(const std::vector<PartialAgg*>& paos);
 
         Operations* to_;
+
+        // received paos
+        PartialAgg** recv_paos_;
 
         // dataset generation
         std::vector<char*> fillers_;

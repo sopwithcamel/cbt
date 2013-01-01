@@ -81,6 +81,7 @@ namespace cbtservice {
 
     CBTServer::CBTServer() :
             kPAOsInsertAtTime(100000),
+            kMaxUniquePAOs(10000000),
             stop_server_(false),
             total_PAOs_inserted_(0) {
         uint32_t fanout = 8;
@@ -99,12 +100,15 @@ namespace cbtservice {
         for (uint32_t i = 0; i < kPAOsInsertAtTime; ++i) {
             to_->createPAO(NULL, &recv_paos_[i]);
         }
+        send_paos_ = reinterpret_cast<PartialAgg**>(malloc(sizeof(PartialAgg*)
+                * kPAOsInsertAtTime));
     }
 
     CBTServer::~CBTServer() {
         for (uint32_t i = 0; i < kPAOsInsertAtTime; ++i)
             to_->destroyPAO(recv_paos_[i]);
         free(recv_paos_);
+        free(send_paos_);
         delete cbt_;
         delete to_;
     }
@@ -133,9 +137,37 @@ namespace cbtservice {
             }
                 
             //  Send reply back to client
-            zmq::message_t reply (5);
-            memcpy((void *)reply.data(), ret? "True" : "False", 5);
-            socket.send(reply);
+            //  1. set up a coded stream to wrap a stringstream
+            std::stringstream ss;
+            OstreamOutputStream* os = new OstreamOutputStream(&ss);
+            CodedOutputStream* cs = new CodedOutputStream(os);
+
+            //  2. read the results from the CBT
+            uint64_t num_read;
+            bool remain = cbt_->bulk_read(send_paos_, num_read,
+                    kMaxUniquePAOs);
+            if (remain)
+                fprintf(stderr, "More results remaining\n");
+
+            //  3. serialize results to the stream
+            for (uint32_t i = 0; i < num_read; ++i) {
+                assert(static_cast<ProtobufOperations*>(to_)->serialize(
+                            static_cast<PartialAgg*>(send_paos_[i]), cs));
+            }
+
+            //  4. delete the wrapper streams to flush results to stringstream
+            delete cs;
+            delete os;
+
+            //  5. set up zeromq message to send reply
+            s_send(socket, ss.str());
+            fprintf(stderr, "Sent %d results to client\n", num_read);
+
+            //  6. clean up
+            for (uint32_t i = 0; i < num_read; ++i)
+                static_cast<ProtobufOperations*>(to_)->destroyPAO(
+                        static_cast<PartialAgg*>(send_paos_[i]));
+                
         }
     }
 
