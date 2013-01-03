@@ -186,6 +186,8 @@ namespace cbt {
     }
 
     void CompressTree::emptyTree() {
+        if (empty_)
+            return;
         std::deque<Node*> delList1;
         std::deque<Node*> delList2;
         delList1.push_back(rootNode_);
@@ -443,6 +445,9 @@ namespace cbt {
     }
 
     void CompressTree::stopThreads() {
+        if (!threadsStarted_)
+            return;
+
         delete inputNode_;
 
         merger_->stopThreads();
