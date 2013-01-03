@@ -7,6 +7,7 @@ cbt
 * [Google test](http://code.google.com/p/googletest/)
 * [Snappy](http://code.google.com/p/snappy/)
 * [jemalloc](http://www.canonware.com/jemalloc/)
+* [Google perftools](http://code.google.com/p/gperftools/wiki/GooglePerformanceTools)
 * Pthreads
 
 ## Additional for server ##
@@ -17,6 +18,6 @@ cbt
 
 # Installation on Ubuntu #
 ## For CBT ##
-	sudo apt-get install scons cppcheck libgtest-dev libprotobuf-dev libsnappy-dev libjemalloc-dev
+	sudo apt-get install scons cppcheck libgtest-dev libprotobuf-dev libsnappy-dev libjemalloc-dev libgoogle-perftools-dev
 ## For server ##
     sudo apt-get install libzmq-dev
