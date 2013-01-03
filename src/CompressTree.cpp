@@ -161,7 +161,7 @@ namespace cbt {
                 // Again wait for all to end
                 int all_done;
                 do {
-                    usleep(1000);
+                    usleep(10000);
                     sem_getvalue(&sleepSemaphore_, &all_done);
                 } while (all_done);
                 emptyTree();
@@ -222,7 +222,7 @@ namespace cbt {
 
         int all_done;
         do {
-            usleep(1000);
+            usleep(10000);
             sem_getvalue(&sleepSemaphore_, &all_done);
         } while (all_done);
 
