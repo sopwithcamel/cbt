@@ -290,7 +290,7 @@ namespace cbt {
         fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
                 node->id_, node->buffer_.numElements());
         printElements();
-#endif
+#endif  // CT_NODE_DEBUG
     }
 
     std::string Sorter::getSlaveName() const {
@@ -387,7 +387,7 @@ namespace cbt {
         fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to genie list: ",
                 node->id_, node->buffer_.numElements(), ret? "True" : "False");
         printElements();
-#endif
+#endif  // CT_NODE_DEBUG
     }
 
     std::string Emptier::getSlaveName() const {
@@ -432,6 +432,7 @@ namespace cbt {
         if (state == COMPRESS) {
             addNodeToQueue(node, /*priority=*/0);
         } else {
+#ifdef PRIORITIZED_QUEUEING
             addNodeToQueue(node, /*priority=*/node->level());
 #else  // PRIORITIZED_QUEUEING
             addNodeToQueue(node, /*priority=*/0);
@@ -603,7 +604,12 @@ namespace cbt {
     void Genie::work(Node* n) {
         bool is_root = n->isRoot();
 
-        n->perform();
+        if (n->schedule_mask_.is_set(DECOMPRESS))
+                n->perform(DECOMPRESS);
+        if (n->schedule_mask_.is_set(SORT))
+                n->perform(SORT);
+        if (n->schedule_mask_.is_set(COMPRESS))
+                n->perform(COMPRESS);
 
         // No other node is dependent on the root. Performing this check also
         // avoids the problem, where perform() causes the creation of a new
@@ -615,10 +621,12 @@ namespace cbt {
         queue_.post(n);
         pthread_spin_unlock(&nodesLock_);
 
+/*
         // handle notifications
         Action act = n->getQueueStatus();
         if (act == DECOMPRESS_ONLY)
             n->done(act);
+*/
     }
 
     void Genie::addNode(Node* node) {

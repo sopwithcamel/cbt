@@ -145,8 +145,12 @@ namespace cbt {
             assert(curLeaf->buffer_.lists_.size() == 1);
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
+#ifdef PIPELINED_IMPL
             curLeaf->schedule(DECOMPRESS);
             curLeaf->wait(DECOMPRESS);
+#else  // !PIPELINED_IMPL
+            curLeaf->buffer_.decompress();
+#endif  // PIPELINED_IMPL
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -183,8 +187,12 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
+#ifdef PIPELINED_IMPL
             n->schedule(DECOMPRESS);
             n->wait(DECOMPRESS);
+#else  // !PIPELINED_IMPL
+            n->buffer_.decompress();
+#endif  // PIPELINED_IMPL
             lastOffset_ = 0;
             lastElement_ = 0;
         }

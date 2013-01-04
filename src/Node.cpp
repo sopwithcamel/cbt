@@ -206,7 +206,6 @@ namespace cbt {
                     fprintf(stderr,
                             "Node: %d: Can't place %u among children\n", id_,
                             l->hashes_[curElement]);
-                    buffer_.checkIntegrity();
                     assert(false);
                 }
 #endif
@@ -305,19 +304,16 @@ namespace cbt {
 
     bool Node::sortBuffer() {
         bool ret = buffer_.sort();
-        buffer_.checkSortIntegrity();
         return ret;
     }
 
     bool Node::aggregateBuffer(const NodeState& act) {
         bool ret = buffer_.aggregate(act == SORT? true : false);
-        buffer_.checkSortIntegrity();
         return ret;
     }
 
     bool Node::mergeBuffer() {
         bool ret = buffer_.merge();
-        buffer_.checkSortIntegrity();
         return ret;
     }
 
@@ -325,8 +321,6 @@ namespace cbt {
      * new leaf and inserting a median value as the separator element into the
      * parent */
     Node* Node::splitLeaf() {
-        buffer_.checkSortIntegrity();
-
         // select splitting index
         uint32_t num = buffer_.numElements();
         uint32_t splitIndex = num/2;
@@ -337,7 +331,7 @@ namespace cbt {
             if (splitIndex == num) {
                 assert(false);
             }
-#endif
+#endif  // ENABLE_ASSERT_CHECKS
         }
 
         checkSerializationIntegrity();
@@ -356,15 +350,12 @@ namespace cbt {
         buffer_.delList(0);
         l = buffer_.lists_[0];
 
-        // check integrity of both leaves
-        newLeaf->buffer_.checkSortIntegrity();
-        buffer_.checkSortIntegrity();
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d splits to Node %d: new indices: %u and\
                 %u; new separators: %u and %u\n", id_, newLeaf->id_,
                 l->num_, newLeaf->buffer_.lists_[0]->num_, separator_,
                 newLeaf->separator_);
-#endif
+#endif  // CT_NODE_DEBUG
 
         // if leaf is also the root, create new root
         if (isRoot()) {
@@ -417,6 +408,7 @@ namespace cbt {
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;
+        buffer_.checkSortIntegrity(l);
 #else  // !STRUCTURED_BUFFER
         Buffer::List* l;
         if (buffer_.lists_.size() == 0 || buffer_.lists_[0] == parent_list)
@@ -435,9 +427,6 @@ namespace cbt {
         l->num_ += num;
         l->size_ += num_bytes;
 #endif  // STRUCTURED_BUFFER
-        buffer_.checkIntegrity();
-        checkSerializationIntegrity(buffer_.lists_.size()-1);
-        buffer_.checkSortIntegrity(l);
         return true;
     }
 
@@ -495,7 +484,7 @@ namespace cbt {
                     children_[newNodeChildIndex-1]->separator_);
             assert(false);
         }
-#endif
+#endif  // ENABLE_ASSERT_CHECKS
         // add children to new node
         for (uint32_t i = newNodeChildIndex; i < children_.size(); ++i) {
             newNode->children_.push_back(children_[i]);
@@ -527,7 +516,7 @@ namespace cbt {
         for (uint32_t j = 0; j < newNode->children_.size(); ++j)
             fprintf(stderr, "%d, ", newNode->children_[j]->id_);
         fprintf(stderr, "]\n");
-#endif
+#endif  // CT_NODE_DEBUG
 
         if (isRoot()) {
             buffer_.setCompressible(true);
@@ -645,8 +634,16 @@ namespace cbt {
 #else  // !PIPELINED_IMPL
         switch(state) {
             case COMPRESS:
+                {
+                    // add node to empty
+                    if (!schedule_mask_.is_set(COMPRESS)) {
+                        schedule_mask_.set(COMPRESS);
+                        tree_->genie_->addNode(this);
+                        tree_->genie_->wakeup();
+                    }
+                }
+                break;
             case DECOMPRESS:
-            case SORT:
                 {
                     // add node to empty
                     if (!schedule_mask_.is_set(DECOMPRESS)) {
@@ -656,12 +653,18 @@ namespace cbt {
                     }
                 }
                 break;
+            case SORT:
+                {
+                    // add node to empty
+                    if (!schedule_mask_.is_set(SORT)) {
+                        schedule_mask_.set(SORT);
+                        tree_->genie_->addNode(this);
+                        tree_->genie_->wakeup();
+                    }
+                }
+                break;
             case MERGE:
             case EMPTY:
-            case NONE:
-                {
-                    assert(false);
-                }
                 break;
         }
 #endif  // PIPELINED_IMPL
@@ -754,7 +757,6 @@ namespace cbt {
                 emptyBuffer();
                 if (isLeaf())
                     tree_->handleFullLeaves();
-                setQueueStatus(NONE);
                 break;
             case SORT:  // emptying a root
                 sortBuffer();
@@ -762,21 +764,31 @@ namespace cbt {
                 emptyBuffer();
                 if (isLeaf())
                     tree_->handleFullLeaves();
-                setQueueStatus(NONE);
-                tree_->submitNextRootNode();
                 break;
         }
 #endif  // PIPELINED_IMPL
-    }
 
         // clear the current mask
         state_mask_.clear();
 
         // set next state
+#ifdef PIPELINED_IMPL
         if (state == EMPTY)
             state_mask_.set(DEFAULT);
         else
             state_mask_.set(state);
+#else  // !PIPELINED_IMPL
+        if (state == DECOMPRESS) {
+            if (isLeaf())
+                state_mask_.set(COMPRESS);
+            else
+                state_mask_.set(DEFAULT);
+        } else if (state == SORT) {
+            state_mask_.set(DEFAULT);
+        } else {
+            state_mask_.set(state);
+        }
+#endif  // PIPELINED_IMPL
 
         // unset from schedule mask and set in state mask
         schedule_mask_.unset(state);
@@ -785,6 +797,9 @@ namespace cbt {
         if (state == EMPTY && rootFlag) {
             tree_->sorter_->submitNextNodeForEmptying();
         }
+#else  // !PIPELINED_IMPL
+        if (state == SORT)
+            tree_->submitNextRootNode();
 #endif  // PIPELINED_IMPL
     }
 
@@ -833,39 +848,6 @@ namespace cbt {
             }
         }
         tree_->destroyPAO_(pao);
-#endif
-        return true;
-    }
-
-    bool Node::checkIntegrity() {
-#if 0
-        uint32_t offset;
-        offset = 0;
-        for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {
-            Buffer::List* l = buffer_.lists_[j];
-            for (uint32_t i = 0; i < l->num_-1; ++i) {
-                if (l->hashes_[i] > l->hashes_[i+1]) {
-                    fprintf(stderr, "Node: %d, List: %d: Hash %u at index %u\
-                            greater than hash %u at %u (size: %u)\n", id_, j,
-                            l->hashes_[i], i, l->hashes_[i+1],
-                            i+1, l->num_);
-                    assert(false);
-                }
-            }
-            for (uint32_t i = 0; i < l->num_; ++i) {
-                if (l->sizes_[i] == 0) {
-                    fprintf(stderr, "Element %u in list %u has 0 size; tot\
-                            size: %u\n", i, j, l->num_);
-                    assert(false);
-                }
-            }
-            if (l->hashes_[l->num_-1] >= separator_) {
-                fprintf(stderr, "Node: %d: Hash %u at index %u\
-                        greater than separator %u\n", id_,
-                        l->hashes_[l->num_-1], l->num_-1, separator_);
-                assert(false);
-            }
-        }
 #endif
         return true;
     }

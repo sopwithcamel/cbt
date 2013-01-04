@@ -696,7 +696,6 @@ namespace cbt {
 #endif  // CT_NODE_DEBUG
         }
 #endif  // ENABLE_COMPRESSION
-        checkIntegrity();
         return true;
     }
 
@@ -880,11 +879,8 @@ namespace cbt {
 
 #endif  // ENABLE_PAGING
 
-    bool Buffer::checkSortIntegrity() {
+    bool Buffer::checkSortIntegrity(List* l) {
 #ifdef ENABLE_INTEGRITY_CHECK
-        if (lists_.size() == 0)
-            return true;
-        List* l = lists_[0];
         for (uint32_t i = 0; i < l->num_; ++i) {
             assert(l->hashes_[i] > 0);
             assert(l->sizes_[i] > 0);
