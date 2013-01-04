@@ -44,6 +44,9 @@ DEFINE_uint64(unique, 0, "Number of unique keys");
 DEFINE_int32(length, 0, "Key length");
 DEFINE_bool(powerlaw, false, "Use power-law input distribution");
 
+#define S(x) #x
+#define SX(x) S(x)
+
 namespace cbtservice {
 
     CBTClient::CBTClient(uint32_t u, uint32_t l, InputDistribution d) :
@@ -223,7 +226,7 @@ namespace cbtservice {
     bool CBTClient::LinkUserMap() { 
         const char* err;
         void* handle;
-        std::string soname = "/usr/local/lib/minni/wc_proto.so";
+        std::string soname(SX(SRV_PATH)"/wc_proto.so");
         handle = dlopen(soname.c_str(), RTLD_LAZY);
         if (!handle) {
             fputs(dlerror(), stderr);

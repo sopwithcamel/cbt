@@ -47,6 +47,9 @@ using namespace std;
 DEFINE_bool(timed, false, "Do a timed run");
 DEFINE_bool(heapcheck, false, "Heap check");
 
+#define S(x) #x
+#define SX(x) S(x)
+
 namespace cbtservice {
     // Global static pointer used to ensure a single instance of the class.
     CBTServer* CBTServer::instance_ = NULL; 
@@ -203,7 +206,7 @@ namespace cbtservice {
     bool CBTServer::LinkUserMap() { 
         const char* err;
         void* handle;
-        std::string soname = "/usr/local/lib/minni/wc_proto.so";
+        std::string soname(SX(SRV_PATH)"/wc_proto.so");
         handle = dlopen(soname.c_str(), RTLD_LAZY);
         if (!handle) {
             fputs(dlerror(), stderr);

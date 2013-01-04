@@ -26,9 +26,11 @@ def Utility(target, source, action):
 src_files = [Glob('src/*.cpp'), Glob('util/*.cpp'), 'util/lz4.c']
 cbt_install_headers = Glob('src/*.h')
 prefix = '/usr/local'
+cbt_root = Dir('.').abspath
+cbt_service_path = os.path.join(cbt_root, 'service')
 
 env.Append(CCFLAGS = ['-g', '-O3', '-Wall'],
-            CPPFLAGS = ['-Isrc/', '-Iutil/', '-Icommon'])
+            CPPFLAGS = ['-Isrc/', '-Iutil/', '-Icommon', '-DSRV_PATH=' + cbt_service_path])
 cbtlib = env.SharedLibrary('cbt', src_files,
             LIBS = ['-ljemalloc'])
 
