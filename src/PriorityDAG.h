@@ -84,11 +84,7 @@ namespace cbt {
             uint32_t i, s = n->children_.size();
             std::set<uint32_t>* d = new std::set<uint32_t>();
             for (i = 0; i < s; ++i) {
-#ifdef PIPELINED_IMPL
-                if (n->children_[i]->getQueueStatus() < COMPRESS) {
-#else  // !PIPELINED_IMPL
-                if (n->children_[i]->getQueueStatus() != NONE) {
-#endif  // PIPELINED_IMPL
+                if (!n->children_[i]->canEmptyIntoNode()) {
                     canEmpty = false;
                     d->insert(n->children_[i]->id());
                 }
@@ -132,11 +128,7 @@ namespace cbt {
         void post(Node* n) {
             // If parent is present, it must be in the disabled queue.
             // remove n from its parent's dependency list
-#ifdef PIPELINED_IMPL
-            if (n->parent_ && n->parent_->getQueueStatus() == EMPTY) {
-#else  // !PIPELINED_IMPL
-            if (n->parent_ && n->parent_->getQueueStatus() != NONE) {
-#endif  // PIPELINED_IMPL
+            if (n->parent_ && n->parent_->schedule_mask_.is_set(EMPTY)) {
                 DisabledDAG::iterator parent_it = disabNodes_.find(n->parent_);
                 if (parent_it != disabNodes_.end()) {
                     std::set<uint32_t>* ch = parent_it->second;

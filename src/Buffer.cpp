@@ -31,6 +31,7 @@
 #include "compsort.h"
 #include "rle.h"
 #include "snappy.h"
+#include "lz4.h"
 
 namespace cbt {
     uint64_t Buffer::List::allocated_lists = 0;
@@ -381,9 +382,6 @@ namespace cbt {
     }
 
     bool Buffer::merge() {
-        std::priority_queue<Buffer::MergeElement,
-                std::vector<Buffer::MergeElement>,
-                MergeComparator> queue;
 
         if (empty())
             return true;
@@ -410,28 +408,61 @@ namespace cbt {
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
-        for (uint32_t i = 0; i < lists_.size(); ++i) {
+        uint32_t nlists = lists_.size();
+        uint32_t* heads = new uint32_t[nlists];
+        uint32_t* indices = new uint32_t[nlists];
+        uint32_t* offsets = new uint32_t[nlists]; 
+
+#ifdef CT_NODE_DEBUG
+        for (uint32_t i = 0; i < nlists; ++i)
+            checkSortIntegrity(lists_[i]);
+#endif  // CT_NODE_DEBUG
+
+        uint32_t num_non_empty_lists = 0;
+        for (uint32_t i = 0; i < nlists; ++i) {
             if (lists_[i]->num_ > 0) {
-                MergeElement* mge = new MergeElement(
-                        lists_[i]);
-                queue.push(*mge);
+                heads[i] = lists_[i]->hashes_[0];
+                indices[i] = 0;
+                offsets[i] = 0;
+                ++num_non_empty_lists;
+            } else {
+                heads[i] = 0xffffffff;
             }
         }
 
-        while (!queue.empty()) {
-            MergeElement n = queue.top();
-            queue.pop();
-
+        while (num_non_empty_lists) {
+            // find min
+            uint32_t min = 0xffffffff;
+            uint32_t min_index = nlists;
+            for (uint32_t i = 0; i < nlists; ++i) {
+                if (heads[i] < min) {
+                    min = heads[i];
+                    min_index = i;
+                }
+            }
             // copy hash values
-            aux_list_->hashes_[aux_list_->num_] = n.hash();
-            uint32_t buf_size = n.size();
-            aux_list_->sizes_[aux_list_->num_] = buf_size;
-            perm_[aux_list_->num_] = n.data();
+            List* min_list = lists_[min_index];
+
+            aux_list_->hashes_[aux_list_->num_] = min;
+            aux_list_->sizes_[aux_list_->num_] =
+                    min_list->sizes_[indices[min_index]];
+            perm_[aux_list_->num_] = min_list->data_ +
+                    offsets[min_index];
             aux_list_->num_++;
-            // increment n pointer and re-insert n into prioQ
-            if (n.next())
-                queue.push(n);
+
+            // update values
+            offsets[min_index] += min_list->sizes_[indices[min_index]];
+            ++indices[min_index];
+            // check if end of list is reached
+            if (indices[min_index] < min_list->num_) {
+                // update head
+                heads[min_index] = min_list->hashes_[indices[min_index]];
+            } else {
+                heads[min_index] = 0xffffffff;
+                --num_non_empty_lists;
+            }
         }
+        checkSortIntegrity(aux_list_);
         return true;
     }
 
@@ -481,7 +512,7 @@ namespace cbt {
                 // the size wouldn't have changed
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
                 //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-                memmove(a->data_ + a->size_,
+                memcpy(a->data_ + a->size_,
                         reinterpret_cast<void*>(perm_[lastIndex]),
                         l->sizes_[lastIndex]);
                 a->size_ += l->sizes_[lastIndex];
@@ -505,7 +536,7 @@ namespace cbt {
             // the size wouldn't have changed
             a->sizes_[a->num_] = l->sizes_[lastIndex];
             // memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
-            memmove(a->data_ + a->size_,
+            memcpy(a->data_ + a->size_,
                     reinterpret_cast<void*>(perm_[lastIndex]),
                     l->sizes_[lastIndex]);
             a->size_ += l->sizes_[lastIndex];
@@ -565,7 +596,7 @@ namespace cbt {
                 // latest added list
                 Buffer::List* cl =
                         compressed.lists_[compressed.lists_.size()-1];
-#ifndef ENABLE_SPECIALIZED_COMPRESSION
+#ifdef SNAPPY_COMPRESSION
                 snappy::RawCompress((const char*)l->hashes_,
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->hashes_),
@@ -574,15 +605,27 @@ namespace cbt {
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->sizes_),
                         &l->c_sizelen_);
-#else  // ENABLE_SPECIALIZED_COMPRESSION
+                snappy::RawCompress(l->data_, l->size_,
+                        cl->data_,
+                        &l->c_datalen_);
+#else
+                l->c_hashlen_ = LZ4_compress((const char*)l->hashes_,
+                        reinterpret_cast<char*>(cl->hashes_),
+                        l->num_ * sizeof(uint32_t));
+                l->c_sizelen_ = LZ4_compress((const char*)l->sizes_,
+                        reinterpret_cast<char*>(cl->sizes_),
+                        l->num_ * sizeof(uint32_t));
+                l->c_datalen_ = LZ4_compress(l->data_, cl->data_, l->size_);
+/*
                 compsort::compress(l->hashes_, l->num_,
                         cl->hashes_, (uint32_t&)l->c_hashlen_);
                 rle::encode(l->sizes_, l->num_, cl->sizes_,
                         (uint32_t&)l->c_sizelen_);
-#endif  // ENABLE_SPECIALIZED_COMPRESSION
                 snappy::RawCompress(l->data_, l->size_,
                         cl->data_,
                         &l->c_datalen_);
+*/
+#endif
                 l->deallocate();
                 l->hashes_ = cl->hashes_;
                 l->sizes_ = cl->sizes_;
@@ -614,20 +657,31 @@ namespace cbt {
                 // latest added list
                 Buffer::List* l =
                         decompressed.lists_[decompressed.lists_.size()-1];
-#ifndef ENABLE_SPECIALIZED_COMPRESSION
+#ifdef SNAPPY_COMPRESSION
                 snappy::RawUncompress((const char*)cl->hashes_,
                         cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
                 snappy::RawUncompress((const char*)cl->sizes_,
                         cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
+                snappy::RawUncompress(cl->data_, cl->c_datalen_,
+                        l->data_);
 #else
+                assert(LZ4_uncompress((const char*)cl->hashes_,
+                        reinterpret_cast<char*>(l->hashes_),
+                        cl->num_ * sizeof(uint32_t)) == cl->c_hashlen_);
+                assert(LZ4_uncompress((const char*)cl->sizes_,
+                        reinterpret_cast<char*>(l->sizes_),
+                        cl->num_ * sizeof(uint32_t)) == cl->c_sizelen_);
+                assert(LZ4_uncompress(cl->data_, l->data_, cl->size_) == cl->c_datalen_);
+/*
                 uint32_t siz;
                 compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
                         l->hashes_, siz);
                 rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
                         l->sizes_, siz);
-#endif
                 snappy::RawUncompress(cl->data_, cl->c_datalen_,
                         l->data_);
+*/
+#endif
                 cl->deallocate();
                 cl->hashes_ = l->hashes_;
                 cl->sizes_ = l->sizes_;
@@ -823,20 +877,8 @@ namespace cbt {
     Buffer::PageAction Buffer::getPageAction() {
         return pageAct_;
     }
-#endif  // ENABLE_PAGING
 
-    bool Buffer::checkIntegrity() {
-#ifdef ENABLE_INTEGRITY_CHECK
-        if (lists_.size() == 0)
-            return true;
-        List* l = lists_[0];
-        for (uint32_t i = 0; i < l->num_; ++i) {
-            assert(l->hashes_[i] > 0);
-            assert(l->sizes_[i] > 0);
-        }
-#endif
-        return true;
-    }
+#endif  // ENABLE_PAGING
 
     bool Buffer::checkSortIntegrity() {
 #ifdef ENABLE_INTEGRITY_CHECK

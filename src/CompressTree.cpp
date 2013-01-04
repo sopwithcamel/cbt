@@ -130,6 +130,8 @@ namespace cbt {
     }
 
     bool CompressTree::nextValue(void*& hash, PartialAgg*& agg) {
+        if (empty_)
+            return false;
         if (!allFlush_) {
             flushBuffers();
             lastLeafRead_ = 0;
@@ -143,11 +145,9 @@ namespace cbt {
             assert(curLeaf->buffer_.lists_.size() == 1);
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(DECOMPRESS_ONLY);
-            curLeaf->wait(DECOMPRESS_ONLY);
+            curLeaf->schedule(DECOMPRESS);
+            curLeaf->wait(DECOMPRESS);
         }
-        if (empty_)
-            return false;
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->buffer_.lists_[0];
@@ -173,7 +173,7 @@ namespace cbt {
                 // Again wait for all to end
                 int all_done;
                 do {
-                    usleep(100);
+                    usleep(10000);
                     sem_getvalue(&sleepSemaphore_, &all_done);
                 } while (all_done);
                 emptyTree();
@@ -183,8 +183,8 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(DECOMPRESS_ONLY);
-            n->wait(DECOMPRESS_ONLY);
+            n->schedule(DECOMPRESS);
+            n->wait(DECOMPRESS);
             lastOffset_ = 0;
             lastElement_ = 0;
         }
@@ -198,6 +198,9 @@ namespace cbt {
     }
 
     void CompressTree::emptyTree() {
+        if (empty_)
+            return;
+
         std::deque<Node*> delList1;
         std::deque<Node*> delList2;
         delList1.push_back(rootNode_);
@@ -238,7 +241,7 @@ namespace cbt {
 
         int all_done;
         do {
-            usleep(100);
+            usleep(10000);
             sem_getvalue(&sleepSemaphore_, &all_done);
         } while (all_done);
 
@@ -374,7 +377,7 @@ namespace cbt {
 
     bool CompressTree::rootNodeAvailable() {
         if (!rootNode_->buffer_.empty() ||
-                rootNode_->getQueueStatus() != NONE)
+                !rootNode_->state_mask_.is_set(DEFAULT))
             return false;
         return true;
     }
@@ -385,6 +388,10 @@ namespace cbt {
         temp.lists_ = rootNode_->buffer_.lists_;
         rootNode_->buffer_.lists_ = n->buffer_.lists_;
         rootNode_->schedule(EMPTY);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Submitting node %d for emptying\n",
+                rootNode_->id());
+#endif  // CT_NODE_DEBUG
 
         n->buffer_.lists_ = temp.lists_;
         temp.clear();
@@ -516,6 +523,9 @@ namespace cbt {
     }
 
     void CompressTree::stopThreads() {
+        if (!threadsStarted_)
+            return;
+
         delete inputNode_;
 
 #ifdef PIPELINED_IMPL
