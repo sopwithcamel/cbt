@@ -510,8 +510,7 @@ namespace cbt {
                 }
                 break;
             case EMPTY:
-                {
-                }
+            default:
                 break;
         }
     }
@@ -572,6 +571,8 @@ namespace cbt {
                     }
                 }
                 break;
+            default:
+                assert(false && "Illegal state");
         }
     }
 
@@ -586,6 +587,7 @@ namespace cbt {
                     pthread_mutex_unlock(&compMutex_);
                 }
                 break;
+            case SORT:
             case MERGE:
                 {
                     pthread_mutex_lock(&sortMutex_);
@@ -602,6 +604,8 @@ namespace cbt {
                     pthread_mutex_unlock(&emptyMutex_);
                 }
                 break;
+            default:
+                assert(false && "Illegal state");
         }
     }
 
@@ -642,6 +646,8 @@ namespace cbt {
                         tree_->handleFullLeaves();
                 }
                 break;
+            default:
+                assert(false && "Illegal state");
         }
 
         // clear the current mask

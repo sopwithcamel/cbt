@@ -46,7 +46,7 @@ namespace cbt {
         COMPRESS = 2,
         SORT = 3,
         MERGE = 4,
-        EMPTY = 5
+        EMPTY = 5,
     };
 
     struct StateMask {
