@@ -41,8 +41,7 @@ namespace cbt {
     Node::Node(CompressTree* tree, uint32_t level) :
             tree_(tree),
             level_(level),
-            parent_(NULL),
-            queueStatus_(NONE) {
+            parent_(NULL) {
         id_ = tree_->nodeCtr++;
         buffer_.setParent(this);
 
@@ -54,8 +53,6 @@ namespace cbt {
 
         pthread_mutex_init(&compMutex_, NULL);
         pthread_cond_init(&compCond_, NULL);
-
-        pthread_spin_init(&queueStatusLock_, PTHREAD_PROCESS_PRIVATE);
 
 #ifdef ENABLE_PAGING
         buffer_.setupPaging();
@@ -111,10 +108,23 @@ namespace cbt {
 
     bool Node::emptyOrCompress() {
         bool ret = true;
-        if (tree_->emptyType_ == ALWAYS || isFull()) {
-            ret = spillBuffer();
-        } else {
+        if (tree_->emptyType_ == ALWAYS) {
+            schedule(DECOMPRESS);
+            schedule(MERGE);
+            return true;
+        }
+
+        uint32_t n = buffer_.numElements();        
+        if (n < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
+        } else {
+            if (!schedule_mask_.is_set(DECOMPRESS) &&
+                    !state_mask_.is_set(DECOMPRESS)) {
+                schedule(DECOMPRESS);
+            }
+            if (isFull()) {
+                schedule(MERGE);
+            }
         }
         return ret;
     }
@@ -261,7 +271,7 @@ namespace cbt {
         return ret;
     }
 
-    bool Node::aggregateBuffer(const Action& act) {
+    bool Node::aggregateBuffer(const NodeState& act) {
         bool ret = buffer_.aggregate(act == SORT? true : false);
         checkIntegrity();
         return ret;
@@ -367,6 +377,7 @@ namespace cbt {
         l->num_ = num;
         l->size_ = num_bytes;
         checkSerializationIntegrity(buffer_.lists_.size()-1);
+        buffer_.checkSortIntegrity(l);
         return true;
     }
 
@@ -478,24 +489,10 @@ namespace cbt {
         return id_;
     }
 
-    Action Node::getQueueStatus() {
-        pthread_spin_lock(&queueStatusLock_);
-        Action ret = queueStatus_;
-        pthread_spin_unlock(&queueStatusLock_);
-        return ret;
-    }
-
-    void Node::setQueueStatus(const Action& act) {
-        pthread_spin_lock(&queueStatusLock_);
-        queueStatus_ = act;
-        pthread_spin_unlock(&queueStatusLock_);
-    }
-
-    void Node::done(const Action& act) {
-        switch(act) {
+    void Node::done(const NodeState& state) {
+        switch(state) {
             case COMPRESS:
             case DECOMPRESS:
-            case DECOMPRESS_ONLY:
                 {
                     // Signal that we're done comp/decomp
                     pthread_mutex_unlock(&compMutex_);
@@ -503,6 +500,7 @@ namespace cbt {
                     pthread_mutex_unlock(&compMutex_);
                 }
                 break;
+            case SORT:
             case MERGE:
                 {
                     // Signal that we're done sorting
@@ -515,37 +513,30 @@ namespace cbt {
                 {
                 }
                 break;
-            case NONE:
-                {
-                    assert(false && "Can't signal NONE");
-                }
-                break;
         }
     }
 
-    void Node::schedule(const Action& act) {
-        switch(act) {
+    void Node::schedule(const NodeState& state) {
+        switch(state) {
             case COMPRESS:
-            case DECOMPRESS:
-            case DECOMPRESS_ONLY:
                 {
-                    bool add;
-                    if (!buffer_.compressible_) {
-                        fprintf(stderr, "Node %d not compressible\n", id_);
+                    if (!buffer_.compressible_ || buffer_.empty())
                         return;
+                    assert(!schedule_mask_.is_set(DECOMPRESS) &&
+                            "This can't happen");
+                    if (!schedule_mask_.is_set(COMPRESS)) {
+                        schedule_mask_.set(COMPRESS);
+                        tree_->compressor_->addNode(this);
+                        tree_->compressor_->wakeup();
                     }
-                    if (act == COMPRESS) {
-                        // check if node has to be added on queue
-                        add = checkCompress();
-                    } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
-                        // check if node has to be added on queue
-                        add = checkDecompress();
-                    } else {
-                        assert(false && "Invalid compress action");
-                    }
-
-                    if (add) {
-                        setQueueStatus(act);
+                } break;
+            case DECOMPRESS:
+                {
+                    if (!buffer_.compressible_ || buffer_.empty())
+                        return;
+                    schedule_mask_.unset(COMPRESS);
+                    if (!schedule_mask_.is_set(DECOMPRESS)) {
+                        schedule_mask_.set(DECOMPRESS);
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
                     }
@@ -553,94 +544,44 @@ namespace cbt {
                 break;
             case SORT:
                 {
-                    setQueueStatus(SORT);
-                    // add node to merger
-                    tree_->sorter_->addNode(this);
-                    tree_->sorter_->wakeup();
+                    // add node to sorter
+                    if (!schedule_mask_.is_set(SORT)) {
+                        schedule_mask_.set(SORT);
+                        tree_->sorter_->addNode(this);
+                        tree_->sorter_->wakeup();
+                    }
                 }
                 break;
             case MERGE:
                 {
-                    setQueueStatus(MERGE);
-                    // add node to merger
-                    tree_->merger_->addNode(this);
-                    tree_->merger_->wakeup();
+                    // add node to merge
+                    if (!schedule_mask_.is_set(MERGE)) {
+                        schedule_mask_.set(MERGE);
+                        tree_->merger_->addNode(this);
+                        tree_->merger_->wakeup();
+                    }
                 }
                 break;
             case EMPTY:
                 {
-                    setQueueStatus(act);
                     // add node to empty
-                    tree_->emptier_->addNode(this);
-                    tree_->emptier_->wakeup();
+                    if (!schedule_mask_.is_set(EMPTY)) {
+                        schedule_mask_.set(EMPTY);
+                        tree_->emptier_->addNode(this);
+                        tree_->emptier_->wakeup();
+                    }
                 }
                 break;
-            case NONE:
-                {
-                    assert(false && "Can't schedule NONE");
-                }
-                break;
         }
     }
 
-    bool Node::checkCompress() {
-        bool ret;
-        Action act = getQueueStatus();
-        if (buffer_.empty()) {
-            // nothing to be done
-            setQueueStatus(NONE);
-            ret = false;
-        } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
-            // check if node already queued as DECOMPRESS. This shouldn't
-            // happen.
-            fprintf(stderr, "Node %d trying to be compressed while\
-                    waiting for decompression\n", id());
-            assert(false);
-        } else if (act == COMPRESS) {
-            // previous list queued for compression hasn't been compressed
-            // yet. No need to add node again
-            ret = false;
-        } else {
-            // Node not present
-            setQueueStatus(COMPRESS);
-            ret = true;
-        }
-        return ret;
-    }
-
-    bool Node::checkDecompress() {
-        bool ret;
-        Action act = getQueueStatus();
-        if (buffer_.empty()) {
-            setQueueStatus(NONE);
-            ret = false;
-        } else if (act == COMPRESS) {
-            // check if compression request is outstanding and cancel this */
-            setQueueStatus(act);
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Node %d reset to decompress\n", id());
-#endif
-            ret = false;
-        } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
-            // we're decompressing twice
-            fprintf(stderr, "decompressing node %d twice", id());
-//            assert(false);
-            ret = true;
-        } else { // NONE
-            setQueueStatus(act);
-            ret = true;
-        }
-        return ret;
-    }
-
-    void Node::wait(const Action& act) {
-        switch (act) {
+    void Node::wait(const NodeState& state) {
+        switch (state) {
             case COMPRESS:
             case DECOMPRESS:
-            case DECOMPRESS_ONLY:
                 {
                     pthread_mutex_lock(&compMutex_);
-                    while (getQueueStatus() == act)
+                    while (schedule_mask_.is_set(state))
                         pthread_cond_wait(&compCond_, &compMutex_);
                     pthread_mutex_unlock(&compMutex_);
                 }
@@ -648,7 +589,7 @@ namespace cbt {
             case MERGE:
                 {
                     pthread_mutex_lock(&sortMutex_);
-                    while (getQueueStatus() == act)
+                    while (schedule_mask_.is_set(state))
                         pthread_cond_wait(&sortCond_, &sortMutex_);
                     pthread_mutex_unlock(&sortMutex_);
                 }
@@ -656,132 +597,80 @@ namespace cbt {
             case EMPTY:
                 {
                     pthread_mutex_lock(&emptyMutex_);
-                    while (getQueueStatus() == act)
+                    while (schedule_mask_.is_set(state))
                         pthread_cond_wait(&emptyCond_, &emptyMutex_);
                     pthread_mutex_unlock(&emptyMutex_);
                 }
                 break;
-#ifdef ENABLE_PAGING
-            case PAGEIN:
-            case PAGEOUT:
-                {
-                    pthread_mutex_lock(&pageMutex_);
-                    while (getQueueStatus() == act)
-                        pthread_cond_wait(&pageCond_, &pageMutex_);
-                    pthread_mutex_unlock(&pageMutex_);
-                }
-                break;
-#endif  // ENABLE_PAGING
-            case NONE:
-                {
-                    assert(false && "Can't wait for NONE");
-                }
-                break;
         }
     }
 
-    void Node::perform() {
-        Action act = getQueueStatus();
-        switch (act) {
+    void Node::perform(const NodeState& state) {
+        bool rootFlag = isRoot();
+        switch (state) {
             case COMPRESS:
             case DECOMPRESS:
-            case DECOMPRESS_ONLY:
                 {
-                    if (act == COMPRESS) {
+                    if (state == COMPRESS) {
                         buffer_.compress();
-                    } else if (act == DECOMPRESS || act == DECOMPRESS_ONLY) {
-#ifdef ENABLE_PAGING
-                        wait(PAGE_IN);
-#endif  // ENABLE_PAGING
+                    } else if (state == DECOMPRESS) {
                         buffer_.decompress();
                     }
                 }
                 break;
-#ifdef ENABLE_PAGING
-            case PAGEIN:
-            case PAGEOUT:
-                {
-                    ret = buffer_.performPageAction();
-#ifdef CT_NODE_DEBUG
-                    if (ret) {
-                        Buffer::PageAction act = getPageAction();
-                        if (act == Buffer::PAGE_OUT)
-                            fprintf(stderr, "pager: paged out node: %d\n", id_);
-                        else if (act == Buffer::PAGE_IN)
-                            fprintf(stderr, "pager: paged in node: %d\n", id_);
-#endif  // CT_NODE_DEBUG
-                    }
-                }
-                break;
-#endif  // ENABLE_PAGING
             case SORT:
                 {
-                    if (isRoot()) {
-                        sortBuffer();
-                        aggregateBuffer(SORT);
-                    } else {
-                        assert(false && "Only the root buffer is sorted");
-                    }
+                    assert(rootFlag && "Only the root buffer is sorted");
+                    sortBuffer();
+                    aggregateBuffer(SORT);
                 }
                 break;
             case MERGE:
                 {
-                    if (!isRoot()) {
-                        mergeBuffer();
-                        aggregateBuffer(MERGE);
-                    } else {
-                        assert(false && "root buffer never sorted");
-                    }
+#ifdef CT_NODE_DEBUG
+                    assert(!rootFlag && "Non-root buffer ever sorted");
+                    assert(state_mask_.is_set(DECOMPRESS));
+#endif  // CT_NODE_DEBUG
+                    mergeBuffer();
+                    aggregateBuffer(MERGE);
                 }
                 break;
             case EMPTY:
                 {
-                    bool rootFlag = isRoot();
                     emptyBuffer();
                     if (isLeaf())
                         tree_->handleFullLeaves();
-                    // if it is a leaf, it might be queued for compression
-                    if (!isLeaf())
-                        setQueueStatus(NONE);
-                    if (rootFlag) {
-                        tree_->sorter_->submitNextNodeForEmptying();
-                    }
-                }
-                break;
-            case NONE:
-                {
-                    assert(false && "Can't perform NONE");
                 }
                 break;
         }
-    }
 
-#ifdef ENABLE_PAGING
-    void Node::scheduleBufferPageAction(const Buffer::PageAction& act)  {
-        if (!buffer_.pageable_) {
-            fprintf(stderr, "Node %d not pageable\n", id_);
-            return;
-        }
-        bool add;
-        if (act == Buffer::PAGE_OUT)
-            add = buffer_.checkPageOut();
-        else if (act == Buffer::PAGE_IN)
-            add = buffer_.checkPageIn();
+        // clear the current mask
+        state_mask_.clear();
+
+        // set next state
+        if (state == EMPTY)
+            state_mask_.set(DEFAULT);
         else
-            assert(false && "Invalid page action");
-        if (add) {
-            tree_->pager_->addNode(this);
-            tree_->pager_->wakeup();
+            state_mask_.set(state);
+
+        // unset from schedule mask and set in state mask
+        schedule_mask_.unset(state);
+
+        if (state == EMPTY && rootFlag) {
+            tree_->sorter_->submitNextNodeForEmptying();
         }
     }
 
-    bool Node::performPageAction() {
+    bool Node::canEmptyIntoNode() {
+        bool ret = true;
+        uint32_t schedule_test_mask = 7;
+        uint32_t state_test_mask = 7;
+        ret &= (schedule_mask_.or_mask(schedule_test_mask) ==
+                schedule_test_mask);        
+        ret &= (state_mask_.or_mask(state_test_mask) ==
+                state_test_mask);        
+        return ret;
     }
-
-    Buffer::PageAction Node::getPageAction() {
-        return buffer_.getPageAction();
-    }
-#endif  // ENABLE_PAGING
 
     bool Node::checkSerializationIntegrity(int listn  /* =-1*/) {
 #if 0
@@ -822,7 +711,7 @@ namespace cbt {
     }
 
     bool Node::checkIntegrity() {
-#ifdef ENABLE_INTEGRITY_CHECK
+#if 0
         uint32_t offset;
         offset = 0;
         for (uint32_t j = 0; j < buffer_.lists_.size(); ++j) {

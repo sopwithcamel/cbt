@@ -275,11 +275,7 @@ namespace cbt {
     }
 
     void Sorter::work(Node* n) {
-#ifdef CT_NODE_DEBUG
-        assert(n->getQueueStatus() == SORT);
-#endif  // CT_NODE_DEBUG
-        n->perform();
-
+        n->perform(SORT);
         addToSorted(n); 
     }
 
@@ -358,12 +354,9 @@ namespace cbt {
 
     void Emptier::work(Node* n) {
         n->wait(MERGE);
-#ifdef CT_NODE_DEBUG
-        assert(n->getQueueStatus() == EMPTY);
-#endif  // CT_NODE_DEBUG
         bool is_root = n->isRoot();
 
-        n->perform();
+        n->perform(EMPTY);
 
         // No other node is dependent on the root. Performing this check also
         // avoids the problem, where perform() causes the creation of a new
@@ -416,60 +409,31 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        Action act = n->getQueueStatus();
-
-#ifdef ENABLE_PAGING
-        if (act == DECOMPRESS || act == DECOMPRESS_ONLY)
-            n->wait(PAGEIN);
-#endif  // ENABLE_PAGING
-
-#ifdef CT_NODE_DEBUG
-        assert(act == DECOMPRESS || act == DECOMPRESS_ONLY || act == COMPRESS);
-#endif  // CT_NODE_DEBUG
-
-        n->perform();
-
-        // schedule to sort
-        if (act == DECOMPRESS) {
-            n->schedule(MERGE);
-        } else if (act == DECOMPRESS_ONLY) {
-            // no further work if we're only decompressing
-            n->setQueueStatus(NONE);
-        } else if (act == COMPRESS) {
-#ifdef ENABLE_PAGING
-            // TODO. This is most likely broken now
-            /* Put in a request for paging out. This is necessary to do
-             * right away because of the following case: if a page-in request
-             * arrives when the node is on the compression queue waiting to
-             * be compressed, the page-in request could simply get discarded
-             * since there is no page-out request (yet). This leads to a case
-             * where a decompression later assumes that the page-in has
-             * completed */
-            n->schedule(PAGEOUT);
-#else
-            // if no paging then set as not queued
-            n->setQueueStatus(NONE);
-#endif  // ENABLE_PAGING
-        }
-
-        n->done(act);
+        NodeState state;
+        if (n->schedule_mask_.is_set(COMPRESS))
+            state = COMPRESS;
+        else
+            state = DECOMPRESS;
+        n->perform(state);
+        n->done(state);
     }
 
     void Compressor::addNode(Node* node) {
-        Action act = node->getQueueStatus();
-        if (act == COMPRESS) {
+        NodeState state;
+        if (node->schedule_mask_.is_set(COMPRESS))
+            state = COMPRESS;
+        else
+            state = DECOMPRESS;
+        if (state == COMPRESS) {
             addNodeToQueue(node, /*priority=*/0);
-        } else { // DECOMPRESS || DECOMPRESS_ONLY
-#ifdef ENABLE_PAGING
-            node->scheduleBufferPageAction(Buffer::PAGE_IN);
-#endif  // ENABLE_PAGING
+        } else {
             addNodeToQueue(node, /*priority=*/node->level());
         }
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
                 node->id_, node->buffer_.numElements(),
-                act == COMPRESS? "compress" : "decompress");
+                state == COMPRESS? "compress" : "decompress");
         printElements();
 #endif  // CT_NODE_DEBUG
     }
@@ -490,12 +454,8 @@ namespace cbt {
     void Merger::work(Node* n) {
         // block until buffer is decompressed
         n->wait(DECOMPRESS);
-        // perform sort or merge
-#ifdef CT_NODE_DEBUG
-        Action act = n->getQueueStatus();
-        assert(act == MERGE);
-#endif  // CT_NODE_DEBUG
-        n->perform();
+        // perform merge
+        n->perform(MERGE);
         // schedule for emptying
         n->schedule(EMPTY);
         // indicate that we're done sorting
@@ -518,79 +478,4 @@ namespace cbt {
     std::string Merger::getSlaveName() const {
         return "Merger";
     }
-
-#ifdef ENABLE_PAGING
-
-    // Pager
-
-    Pager::Pager(CompressTree* tree) :
-            Slave(tree) {
-    }
-
-    Pager::~Pager() {
-    }
-
-
-    void Pager::work(Node* n) {
-        bool suc = n->perform();
-        if (!suc)
-            addNodeToQueue(n);
-    }
-
-    void Pager::addNode(Node* node) {
-        Buffer::PageAction act = node->getPageAction();
-        if (act == Buffer::PAGE_OUT) {
-            addNodeToQueue(node);
-        } else {
-            addNodeToQueue(node, /* toTail = */false);
-        }
-
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d added to page list: ", node->id_);
-        printElements();
-#endif  // CT_NODE_DEBUG
-    }
-
-    std::string Pager::getSlaveName() const {
-        return "Pager";
-    }
-#endif  // ENABLE_PAGING
-
-#ifdef ENABLE_COUNTERS
-    Monitor::Monitor(CompressTree* tree) :
-            Slave(tree),
-            numElements(0),
-            numMerged(0),
-            actr(0),
-            bctr(0),
-            cctr(0) {
-    }
-
-    Monitor::~Monitor() {
-    }
-
-    void Monitor::work(Node* n) {
-        pthread_barrier_wait(&tree_->threadsBarrier_);
-        while (!inputComplete()) {
-            sleep(1);
-            elctr.push_back(numElements);
-        }
-        uint64_t tot = 0;
-        for (uint32_t i = 0; i < elctr.size(); ++i) {
-            tot += elctr[i];
-        }
-        fprintf(stderr, "Avg. number of elements: %f\n",
-                static_cast<float>(tot) / elctr.size());
-        fprintf(stderr, "A: %lu, B:%lu\n", numElements, numMerged);
-        elctr.clear();
-    }
-
-    void Monitor::addNode(Node* n) {
-        return;
-    }
-
-    std::string Monitor::getSlaveName() const {
-        return "Monitor";
-    }
-#endif
 }

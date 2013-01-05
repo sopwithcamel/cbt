@@ -116,7 +116,6 @@ namespace cbt {
           bool compress();
           bool decompress();
           void setCompressible(bool flag);
-          void performCompressAction();
 
 #ifdef ENABLE_PAGING
           /* Paging-related */
@@ -130,6 +129,7 @@ namespace cbt {
           bool performPageAction();
           PageAction getPageAction();
 #endif  // ENABLE_PAGING
+          bool checkSortIntegrity(List* l);
 
         private:
           const Node* node_;
