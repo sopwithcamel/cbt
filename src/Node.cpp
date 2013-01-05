@@ -118,7 +118,9 @@ namespace cbt {
         bool ret = true;
 #ifdef PIPELINED_IMPL
         if (tree_->emptyType_ == ALWAYS) {
+#ifdef STRUCTURED_BUFFER
             schedule(DECOMPRESS);
+#endif  // STRUCTURED_BUFFER
             schedule(MERGE);
             return true;
         }
@@ -129,18 +131,20 @@ namespace cbt {
             // to be executed
             schedule(DECOMPRESS);
             return true;
-#endif  // PIPELINED_IMPL
         }
+#endif  // PIPELINED_IMPL
 
 #ifdef PIPELINED_IMPL
         uint32_t n = buffer_.numElements();        
         if (n < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
+#ifdef STRUCTURED_BUFFER
             if (!schedule_mask_.is_set(DECOMPRESS) &&
                     !state_mask_.is_set(DECOMPRESS)) {
                 schedule(DECOMPRESS);
             }
+#endif  // STRUCTURED_BUFFER
             if (isFull()) {
                 schedule(MERGE);
             }
@@ -186,6 +190,14 @@ namespace cbt {
             return true;
         }
 
+#ifndef STRUCTURED_BUFFER
+        // if we're not using structured buffers, then we need the children to
+        // be decompressed to copy into them. We do this slightly in advance.
+        for (uint32_t i = 0; i < children_.size(); ++i) {
+            children_[i]->schedule(DECOMPRESS);
+        }
+#endif  // STRUCTURED_BUFFER
+
 #ifndef PIPELINED_IMPL
         pthread_spin_lock(&children_lock_);
 #endif  // PIPELINED_IMPL
@@ -227,10 +239,10 @@ namespace cbt {
                      * than *curHash. This invariant needs to be maintained.
                      */
                     if (curElement > lastElement) {
-#ifndef STRUCTURED_BUFFER
-                        children_[curChild]->buffer_.decompress();
-#endif  // STRUCTURED_BUFFER
                         // copy elements into child
+#ifndef STRUCTURED_BUFFER
+                        children_[curChild]->wait(DECOMPRESS);
+#endif  // STRUCTURED_BUFFER
                         children_[curChild]->copyIntoBuffer(l, lastElement,
                                 curElement - lastElement);
 #ifdef CT_NODE_DEBUG
@@ -264,7 +276,7 @@ namespace cbt {
             // copy remaining elements into child
             if (curElement >= lastElement) {
 #ifndef STRUCTURED_BUFFER
-                children_[curChild]->buffer_.decompress();
+                children_[curChild]->wait(DECOMPRESS);
 #endif  // STRUCTURED_BUFFER
                 // copy elements into child
                 children_[curChild]->copyIntoBuffer(l, lastElement,
@@ -716,7 +728,10 @@ namespace cbt {
                 break;
             case SORT:
                 {
+#ifdef STRUCTURED_BUFFER
+                    // for unstructured buffers, all buffers are sorted
                     assert(rootFlag && "Only the root buffer is sorted");
+#endif  // STRUCTURED_BUFFER
                     sortBuffer();
                     aggregateBuffer(SORT);
                 }
@@ -727,8 +742,13 @@ namespace cbt {
                     assert(!rootFlag && "Non-root buffer ever sorted");
                     assert(state_mask_.is_set(DECOMPRESS));
 #endif  // CT_NODE_DEBUG
+#ifdef STRUCTURED_BUFFER
                     mergeBuffer();
                     aggregateBuffer(MERGE);
+#else  // !STRUCTURED_BUFFER
+                    sortBuffer();
+                    aggregateBuffer(SORT);
+#endif  // STRUCTURED_BUFFER
                 }
                 break;
             case EMPTY:

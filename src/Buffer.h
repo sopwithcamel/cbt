@@ -135,6 +135,11 @@ namespace cbt {
           /* buffer fragments */
           std::vector<List*> lists_;
           bool compressible_;
+#ifndef STRUCTURED_BUFFER
+          // required because of the difficulty of preventing concurrent
+          // compression and decompression in the case of unstructured buffers
+          pthread_mutex_t compress_mutex_;
+#endif  // !STRUCTURED_BUFFER
           // used during sort
           char** perm_;
           // used during merge

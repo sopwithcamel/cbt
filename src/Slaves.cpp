@@ -384,7 +384,7 @@ namespace cbt {
         bool ret = queue_.insert(node);
         pthread_spin_unlock(&nodesLock_);
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to genie list: ",
+        fprintf(stderr, "Node %d (sz: %u) (enab: %s) added to emptier list: ",
                 node->id_, node->buffer_.numElements(), ret? "True" : "False");
         printElements();
 #endif  // CT_NODE_DEBUG

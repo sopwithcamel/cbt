@@ -90,10 +90,16 @@ namespace cbt {
 #ifdef ENABLE_PAGING
         pageable_ = true;
 #endif  // ENABLE_PAGING
+#ifndef STRUCTURED_BUFFER
+        pthread_mutex_init(&compress_mutex_, NULL);
+#endif  // !STRUCTURED_BUFFER
     }
 
     Buffer::~Buffer() {
         deallocate();
+#ifndef STRUCTURED_BUFFER
+        pthread_mutex_destroy(&compress_mutex_);
+#endif  // !STRUCTURED_BUFFER
     }
 
     Buffer::List* Buffer::addList(bool isLarge/* = false */) {
@@ -576,6 +582,9 @@ namespace cbt {
 
     bool Buffer::compress() {
 #ifdef ENABLE_COMPRESSION
+#ifndef STRUCTURED_BUFFER
+        pthread_mutex_lock(&compress_mutex_);
+#endif  // !STRUCTURED_BUFFER
         if (!empty()) {
             // allocate memory for one list
             Buffer compressed;
@@ -639,12 +648,18 @@ namespace cbt {
             // clear compressed list so lists won't be deallocated on return
             compressed.clear();
         }
+#ifndef STRUCTURED_BUFFER
+        pthread_mutex_unlock(&compress_mutex_);
+#endif  // !STRUCTURED_BUFFER
 #endif  // ENABLE_COMPRESSION
         return true;
     }
 
     bool Buffer::decompress() {
 #ifdef ENABLE_COMPRESSION
+#ifndef STRUCTURED_BUFFER
+        pthread_mutex_lock(&compress_mutex_);
+#endif  // !STRUCTURED_BUFFER
         if (!empty()) {
             // allocate memory for decompressed buffers
             Buffer decompressed;
@@ -694,6 +709,9 @@ namespace cbt {
             fprintf(stderr, "decompressed node %d; n: %u\n",
                     node_->id_, numElements());
 #endif  // CT_NODE_DEBUG
+#ifndef STRUCTURED_BUFFER
+        pthread_mutex_unlock(&compress_mutex_);
+#endif  // !STRUCTURED_BUFFER
         }
 #endif  // ENABLE_COMPRESSION
         return true;

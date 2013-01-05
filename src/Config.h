@@ -8,12 +8,12 @@
 //#define ENABLE_PAGING
 
 #define ENABLE_COMPRESSION
-//#define PIPELINED_IMPL
-//#define PRIORITIZED_QUEUEING
-//#define MULTIBUFFERED_ROOT
+#define PIPELINED_IMPL
+#define PRIORITIZED_QUEUEING
+#define MULTIBUFFERED_ROOT
 
 #ifdef ENABLE_COMPRESSION
-#define SNAPPY_COMPRESSION
+//#define SNAPPY_COMPRESSION
 #endif  // ENABLE_COMPRESSION
 
 #ifndef PIPELINED_IMPL
@@ -21,7 +21,7 @@
  * new fragment is created from each spill of the parent. The advantage of this
  * method is that previously-created fragments stay compressed in memory until
  * the buffer fills up (when all fragments are decompressed */
-//#define STRUCTURED_BUFFER
+#define STRUCTURED_BUFFER
 #endif  // PIPELINED_IMPL
 
 #endif // CTCONFIG_H
