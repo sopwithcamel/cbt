@@ -496,7 +496,7 @@ namespace cbt {
 
                     pthread_mutex_lock(&in_progress_mask_mutex_);
                     assert(!in_progress_mask_.is_set(A_DECOMPRESS) &&
-                            "A_DECOMPRESS in progress")
+                            "A_DECOMPRESS in progress");
                     pthread_mutex_unlock(&in_progress_mask_mutex_);
 #endif  // ENABLE_ASSERT_CHECKS
 

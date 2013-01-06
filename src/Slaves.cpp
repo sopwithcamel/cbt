@@ -434,8 +434,8 @@ namespace cbt {
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
-                node->id_, node->buffer_.numElements(),
-                state == COMPRESS? "compress" : "decompress");
+                n->id_, n->buffer_.numElements(),
+                action == A_COMPRESS? "compress" : "decompress");
         printElements();
 #endif  // CT_NODE_DEBUG
     }

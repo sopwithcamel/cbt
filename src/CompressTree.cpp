@@ -348,7 +348,7 @@ namespace cbt {
     bool CompressTree::rootNodeAvailable() {
         if (!rootNode_->buffer_.empty())
             return false;
-        uint32_t t = 0;
+        Mask t;
         bool ret = true;
         pthread_mutex_lock(&rootNode_->queue_mask_mutex_);
         ret &= (rootNode_->queue_mask_.or_mask(t) == t);
