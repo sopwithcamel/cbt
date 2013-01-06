@@ -176,7 +176,7 @@ namespace cbt {
         // Things get messed up if some workers enter before all are created
         pthread_barrier_wait(&tree_->threadsBarrier_);
 
-        while (!more()) {
+        while (true) {
             // should never block
             assert(sem_trywait(&tree_->sleepSemaphore_) == 0);
             // mark thread as sleeping in mask
