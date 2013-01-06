@@ -45,31 +45,26 @@ namespace cbt {
         id_ = tree_->nodeCtr++;
         buffer_.setParent(this);
 
-        pthread_mutex_init(&emptyMutex_, NULL);
-        pthread_cond_init(&emptyCond_, NULL);
+        // set initial state as S_EMPTY
+        state_mask_.set(S_EMPTY);
+    
+        pthread_mutex_init(&state_mask_mutex_, NULL);
+        pthread_mutex_init(&queue_mask_mutex_, NULL);
+        pthread_mutex_init(&in_progress_mask_mutex_, NULL);
 
-        pthread_mutex_init(&sortMutex_, NULL);
-        pthread_cond_init(&sortCond_, NULL);
-
-        pthread_mutex_init(&compMutex_, NULL);
-        pthread_cond_init(&compCond_, NULL);
-
+        pthread_cond_init(&state_cond_, NULL);
 #ifdef ENABLE_PAGING
         buffer_.setupPaging();
-        pthread_mutex_init(&pageMutex_, NULL);
-        pthread_cond_init(&pageCond_, NULL);
 #endif  // ENABLE_PAGING
     }
 
     Node::~Node() {
-        pthread_mutex_destroy(&sortMutex_);
-        pthread_cond_destroy(&sortCond_);
+        pthread_mutex_destroy(&state_mask_mutex_);
+        pthread_cond_destroy(&state_cond_);
 
-        pthread_mutex_destroy(&compMutex_);
-        pthread_cond_destroy(&compCond_);
+        pthread_mutex_destroy(&queue_mask_mutex_);
+        pthread_mutex_destroy(&in_progress_mask_mutex_);
 #ifdef ENABLE_PAGING
-        pthread_mutex_destroy(&pageMutex_);
-        pthread_cond_destroy(&pageCond_);
         buffer_.cleanupPaging();
 #endif  // ENABLE_PAGING
     }
@@ -506,60 +501,151 @@ namespace cbt {
         }
     }
 
-    void Node::schedule(const NodeState& state) {
+    void Node::schedule(const NodeAction& action) {
         switch(state) {
-            case COMPRESS:
+            case A_COMPRESS:
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
                         return;
-                    assert(!schedule_mask_.is_set(DECOMPRESS) &&
-                            "This can't happen");
-                    if (!schedule_mask_.is_set(COMPRESS)) {
-                        schedule_mask_.set(COMPRESS);
+#ifdef ENABLE_ASSERT_CHECKS
+                    // check if the node is queued for decompression or if
+                    // decompression is in progress
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    assert(!queue_mask_.is_set(A_DECOMPRESS) &&
+                            "Node queued for A_DECOMPRESS");
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+
+                    pthread_mutex_lock(&in_progress_mask_mutex_);
+                    assert(!in_progress_mask_.is_set(A_DECOMPRESS) &&
+                            "A_DECOMPRESS in progress")
+                    pthread_mutex_unlock(&in_progress_mask_mutex_);
+#endif  // ENABLE_ASSERT_CHECKS
+
+                    // if not already queued for compression, then schedule for
+                    // compression
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    if (!queue_mask_.is_set(A_COMPRESS)) {
+                        queue_mask_.set(A_COMPRESS);
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
                     }
+                    pthread_mutex_unlock(&queue_mask_mutex_);
                 } break;
-            case DECOMPRESS:
+            case A_DECOMPRESS:
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
                         return;
-                    schedule_mask_.unset(COMPRESS);
-                    if (!schedule_mask_.is_set(DECOMPRESS)) {
-                        schedule_mask_.set(DECOMPRESS);
+                    // if the node is queued for compression, we cancel this.
+                    // We still need to schedule decompression, because there
+                    // may be some lists in the buffer which are already
+                    // compressed.
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    queue_mask_.set(A_DECOMPRESS);
+
+#ifdef ENABLE_ASSERT_CHECKS
+                    // we shouldn't be decompressing twice
+                    if (queue_mask_.is_set(A_DECOMPRESS)) {
+                        assert(false && "Decompressing twice");
+                    }
+#endif  // ENABLE_ASSERT_CHECKS
+
+                    if (!queue_mask_.is_set(A_COMPRESS)) {
+                        queue_mask_.unset(A_COMPRESS);
+                    } else {
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
                     }
+                    pthread_mutex_unlock(&queue_mask_mutex_);
                 }
                 break;
-            case SORT:
+#ifdef ENABLE_PAGING
+            case A_PAGEOUT:
                 {
-                    // add node to sorter
-                    if (!schedule_mask_.is_set(SORT)) {
-                        schedule_mask_.set(SORT);
-                        tree_->sorter_->addNode(this);
-                        tree_->sorter_->wakeup();
+                    if (!buffer_.pageable_ || buffer_.empty())
+                        return;
+#ifdef ENABLE_ASSERT_CHECKS
+                    // check if the node is queued for paging in or if
+                    // decompression is in progress. This shouldn't occur.
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    assert(!queue_mask_.is_set(A_PAGEIN) &&
+                            "Node queued for A_PAGEIN");
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+
+                    pthread_mutex_lock(&in_progress_mask_mutex_);
+                    assert(!in_progress_mask_.is_set(A_PAGEIN) &&
+                            "A_PAGEIN in progress")
+                    pthread_mutex_unlock(&in_progress_mask_mutex_);
+#endif  // ENABLE_ASSERT_CHECKS
+
+                    // if not already queued for paging out, then schedule for
+                    // paging out
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    if (!queue_mask_.is_set(A_PAGEOUT)) {
+                        queue_mask_.set(A_PAGEOUT);
+                        tree_->pager_->addNode(this);
+                        tree_->pager_->wakeup();
                     }
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+                } break;
+            case A_PAGEIN:
+                {
+                    if (!buffer_.pageable_ || buffer_.empty())
+                        return;
+                    // if the node is queued for paging out, we cancel this.
+                    // We still need to schedule page-in, because there
+                    // may be some lists in the buffer which are already
+                    // paged out.
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    queue_mask_.set(A_PAGEIN);
+
+#ifdef ENABLE_ASSERT_CHECKS
+                    // we shouldn't be paging-in twice
+                    if (queue_mask_.is_set(A_PAGEIN)) {
+                        assert(false && "Paging in twice");
+                    }
+#endif  // ENABLE_ASSERT_CHECKS
+
+                    if (!queue_mask_.is_set(A_PAGEOUT)) {
+                        queue_mask_.unset(A_PAGEOUT);
+                    } else {
+                        tree_->pager_->addNode(this);
+                        tree_->pager_->wakeup();
+                    }
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+                }
+                break;
+#endif  // ENABLE_PAGING
+            case A_SORT:
+                {
+                    // schedule node for sorting
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    queue_mask_.set(A_SORT);
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+
+                    tree_->sorter_->addNode(this);
+                    tree_->sorter_->wakeup();
                 }
                 break;
             case MERGE:
                 {
-                    // add node to merge
-                    if (!schedule_mask_.is_set(MERGE)) {
-                        schedule_mask_.set(MERGE);
-                        tree_->merger_->addNode(this);
-                        tree_->merger_->wakeup();
-                    }
+                    // schedule node for mergin
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    queue_mask_.set(A_MERGE);
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+
+                    tree_->merger_->addNode(this);
+                    tree_->merger_->wakeup();
                 }
                 break;
             case EMPTY:
                 {
-                    // add node to empty
-                    if (!schedule_mask_.is_set(EMPTY)) {
-                        schedule_mask_.set(EMPTY);
-                        tree_->emptier_->addNode(this);
-                        tree_->emptier_->wakeup();
-                    }
+                    // schedule node for mergin
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    queue_mask_.set(A_EMPTY);
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+
+                    tree_->emptier_->addNode(this);
+                    tree_->emptier_->wakeup();
                 }
                 break;
             default:
@@ -568,92 +654,142 @@ namespace cbt {
     }
 
     void Node::wait(const NodeState& state) {
-        switch (state) {
-            case COMPRESS:
-            case DECOMPRESS:
-                {
-                    pthread_mutex_lock(&compMutex_);
-                    while (schedule_mask_.is_set(state))
-                        pthread_cond_wait(&compCond_, &compMutex_);
-                    pthread_mutex_unlock(&compMutex_);
-                }
-                break;
-            case SORT:
-            case MERGE:
-                {
-                    pthread_mutex_lock(&sortMutex_);
-                    while (schedule_mask_.is_set(state))
-                        pthread_cond_wait(&sortCond_, &sortMutex_);
-                    pthread_mutex_unlock(&sortMutex_);
-                }
-                break;
-            case EMPTY:
-                {
-                    pthread_mutex_lock(&emptyMutex_);
-                    while (schedule_mask_.is_set(state))
-                        pthread_cond_wait(&emptyCond_, &emptyMutex_);
-                    pthread_mutex_unlock(&emptyMutex_);
-                }
-                break;
-            default:
-                assert(false && "Illegal state");
-        }
+        pthread_mutex_lock(&state_mask_mutex_);
+        while (state_mask_.is_set(state))
+            pthread_cond_wait(&state_cond_, &state_mask_mutex_);
+        pthread_mutex_unlock(&state_mask_mutex_);
     }
 
-    void Node::perform(const NodeState& state) {
+    void Node::perform(const NodeAction& action) {
         bool rootFlag = isRoot();
-        switch (state) {
-            case COMPRESS:
-            case DECOMPRESS:
-                {
-                    if (state == COMPRESS) {
-                        buffer_.compress();
-                    } else if (state == DECOMPRESS) {
-                        buffer_.decompress();
-                    }
-                }
+
+        // change the status of the action from queued to in-progress
+        pthread_mutex_lock(&queue_mask_mutex_);
+        pthread_mutex_lock(&in_progress_mask_mutex_);
+        queue_mask_.unset(action)
+        in_progress_mask_.set(action);
+        pthread_mutex_unlock(&in_progress_mask_mutex_);
+        pthread_mutex_unlock(&queue_mask_mutex_);
+
+        switch (action) {
+            case A_COMPRESS:
+                buffer_.compress();
                 break;
-            case SORT:
-                {
-                    assert(rootFlag && "Only the root buffer is sorted");
-                    sortBuffer();
-                    aggregateBuffer(SORT);
-                }
+            case A_DECOMPRESS:
+                buffer_.decompress();
                 break;
-            case MERGE:
-                {
-#ifdef CT_NODE_DEBUG
-                    assert(!rootFlag && "Non-root buffer ever sorted");
-                    assert(state_mask_.is_set(DECOMPRESS));
-#endif  // CT_NODE_DEBUG
-                    mergeBuffer();
-                    aggregateBuffer(MERGE);
-                }
+            case A_SORT:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(rootFlag && "Only root buffer sorted");
+#endif  // ENABLE_ASSERT_CHECKS
+                sortBuffer();
+                aggregateBuffer(A_SORT);
                 break;
-            case EMPTY:
-                {
-                    emptyBuffer();
-                    if (isLeaf())
-                        tree_->handleFullLeaves();
-                }
+            case A_MERGE:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(!rootFlag && "Non-root buffer always merged");
+                pthread_mutex_lock(&state_mask_mutex_);
+                assert(state_mask_.is_set(S_DECOMPRESSED) &&
+                        "Node not decompressed!");
+                pthread_mutex_unlock(&state_mask_mutex_);
+#endif  // ENABLE_ASSERT_CHECKS
+                mergeBuffer();
+                aggregateBuffer(A_MERGE);
+                break;
+            case A_EMPTY:
+#ifdef ENABLE_ASSERT_CHECKS
+                pthread_mutex_lock(&state_mask_mutex_);
+                assert(state_mask_.is_set(S_DECOMPRESSED) &&
+                        "Node not decompressed!");
+                assert(state_mask_.is_set(S_AGGREGATED) &&
+                        "Node not aggregated!");
+                pthread_mutex_unlock(&state_mask_mutex_);
+#endif  // ENABLE_ASSERT_CHECKS
+                emptyBuffer();
+                if (isLeaf())
+                    tree_->handleFullLeaves();
                 break;
             default:
                 assert(false && "Illegal state");
         }
 
-        // clear the current mask
-        state_mask_.clear();
+        pthread_mutex_lock(&state_mask_mutex_);
+        // set state
+        switch(action) {
+            case A_DECOMPRESS:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(state_mask_.is_set(S_COMPRESSED) &&
+                        "A_DECOMPRESS only valid from S_COMPRESSED");
+#endif  // ENABLE_ASSERT_CHECKS
+                // clear the current mask
+                state_mask_.clear();
+                state_mask_.set(S_DECOMPRESSED);
+                break;
+            case A_COMPRESS:
+#ifdef ENABLE_ASSERT_CHECKS
+                // A_COMPRESS is valid from each of S_DECOMPRESSED,
+                // S_COMPRESSED, S_AGGREGATED, and S_PAGED_OUT
+                assert(!state_mask_.is_set(S_EMPTY) &&
+                        "A_COMPRESS not valid from S_EMPTY");
+#endif  // ENABLE_ASSERT_CHECKS
+                if (state_mask_.is_set(S_DECOMPRESSED) ||
+                        state_mask_.is_set(S_AGGREGATED)) {
+                    state_mask_.clear():
+                    state_mask_.set(S_COMPRESSED);
+                }
+                break;
+#ifdef ENABLE_PAGING
+            case A_PAGEIN:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(state_mask_.is_set(S_PAGED_OUT) &&
+                        "A_PAGEIN only valid from S_PAGED_OUT");
+#endif  // ENABLE_ASSERT_CHECKS
+                state_mask_.clear();
+                state_mask_.set(S_COMPRESSED);
+                break;
+            case A_PAGEOUT:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(state_mask_.is_set(S_COMPRESSED) &&
+                        "A_PAGEOUT only valid from S_COMPRESSED");
+#endif  // ENABLE_ASSERT_CHECKS
+                state_mask_.clear();
+                state_mask_.set(S_PAGED_OUT);
+                break;
+#endif  // ENABLE_PAGING
+            case A_SORT:
+            case A_MERGE:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(state_mask_.is_set(S_DECOMPRESSED) &&
+                        "A_SORT and A_MERGE only valid from S_DECOMPRESSED");
+#endif  // ENABLE_ASSERT_CHECKS
+                state_mask_.clear();
+                state_mask_.set(S_AGGREGATED);
+                break;
+            case A_EMPTY:
+#ifdef ENABLE_ASSERT_CHECKS
+                assert(state_mask_.is_set(S_AGGREGATED) &&
+                        "A_EMPTY only valid from S_AGGREGATED");
+#endif  // ENABLE_ASSERT_CHECKS
+                // emptying a leaf would have resulted in the leaf splitting
+                // and producing two aggregated and uncompressed leaves. For
+                // each of the leaves, copyIntoBuffer() would have set the
+                // state of the leaves to S_DECOMPRESSED, so we let that be.
+                if (!isLeaf()) {
+                    state_mask_.clear();
+                    state_mask_.set(S_EMPTY);
+                }
+                break;
+            default:
+                assert(false && "Which state??");
+        }
+        pthread_mutex_unlock(&state_mask_mutex_);
 
-        // set next state
-        if (state == EMPTY)
-            state_mask_.set(DEFAULT);
-        else
-            state_mask_.set(state);
+        // unset action from in-progress mask
+        pthread_mutex_lock(&in_progress_mask_mutex_);
+        in_progress_mask_.unset(state);
+        pthread_mutex_unlock(&in_progress_mask_mutex_);
 
-        // unset from schedule mask and set in state mask
-        schedule_mask_.unset(state);
-
-        if (state == EMPTY && rootFlag) {
+        if (action == A_EMPTY && rootFlag) {
             tree_->sorter_->submitNextNodeForEmptying();
         }
     }

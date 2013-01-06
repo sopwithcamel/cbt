@@ -61,8 +61,6 @@ namespace cbt {
               /* set list to empty */
               void setEmpty();
 
-              static uint64_t allocated_lists;
-
               uint32_t* hashes_;
               uint32_t* sizes_;
               char* data_;
@@ -116,19 +114,6 @@ namespace cbt {
           bool compress();
           bool decompress();
           void setCompressible(bool flag);
-
-#ifdef ENABLE_PAGING
-          /* Paging-related */
-          bool pageOut();
-          bool pageIn();
-          void setPageable(bool flag);
-          /* return value indicates whether the node needs to be added or
-           * if it's already present in the queue */
-          bool checkPageOut();
-          bool checkPageIn();
-          bool performPageAction();
-          PageAction getPageAction();
-#endif  // ENABLE_PAGING
           bool checkSortIntegrity(List* l);
 
         private:
@@ -143,7 +128,6 @@ namespace cbt {
 
 #ifdef ENABLE_PAGING
           /* Paging-related */
-          bool pageable_;
           FILE* f_;
 #endif  // ENABLE_PAGING
     };

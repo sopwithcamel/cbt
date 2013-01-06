@@ -41,76 +41,30 @@ namespace cbt {
     class Merger;
 
     enum NodeState {
-        DEFAULT = 0,
-        DECOMPRESS = 1,
-        COMPRESS = 2,
-        SORT = 3,
-        MERGE = 4,
-        EMPTY = 5,
+        // No PAOs in buffer
+        S_EMPTY = 0,
+        // All lists in buffer are decompressed
+        S_DECOMPRESSED = 1,
+        // Single aggregated list (only one PAO in buffer per key)
+        S_AGGREGATED = 2,
+        // At least one list in compressed state; the rest are decompressed
+        S_COMPRESSED = 3,
+        // At least one list is paged-out; the rest are decompressed or
+        // compressed
+        S_PAGED_OUT = 4,
     };
 
-    struct StateMask {
-      public:
-        StateMask() : mask_(1) {
-            pthread_spin_init(&lock_, PTHREAD_PROCESS_PRIVATE);
-        }
-        ~StateMask() {
-            pthread_spin_destroy(&lock_);
-        }
-
-        bool is_set(const NodeState& state) {
-            uint32_t a = 1 << state;
-            pthread_spin_lock(&lock_);
-            bool ret = a & mask_;
-            pthread_spin_unlock(&lock_);
-            return (ret != 0);
-        }
-
-        void clear() {
-            pthread_spin_lock(&lock_);
-            mask_ = 0;
-            pthread_spin_unlock(&lock_);
-        }
-
-        void set(const NodeState& state) {
-            uint32_t a = 1 << state;
-            pthread_spin_lock(&lock_);
-            mask_ = a | mask_;
-            pthread_spin_unlock(&lock_);
-        }
-
-        void unset(const NodeState& state) {
-            uint32_t a = 0xffffffff - (1 << state);
-            pthread_spin_lock(&lock_);
-            mask_ = a & mask_;
-            pthread_spin_unlock(&lock_);
-        }
-
-        bool zero() {
-            pthread_spin_lock(&lock_);
-            bool ret = mask_;
-            pthread_spin_unlock(&lock_);
-            return (ret == 0);
-        }
-
-        uint32_t and_mask(uint32_t m) {
-            pthread_spin_lock(&lock_);
-            uint32_t ret = mask_ & m;
-            pthread_spin_unlock(&lock_);
-            return ret;
-        }
-
-        uint32_t or_mask(uint32_t m) {
-            pthread_spin_lock(&lock_);
-            uint32_t ret = mask_ | m;
-            pthread_spin_unlock(&lock_);
-            return ret;
-        }
-      private:
-        uint32_t mask_;
-        pthread_spinlock_t lock_;
-    };
-
+    enum NodeAction {
+        A_DECOMPRESS = 0,
+        A_COMPRESS = 1,
+#ifdef ENABLE_PAGING
+        A_PAGEIN = 2,
+        A_PAGEOUT = 3,
+#endif  // ENABLE_PAGING
+        A_SORT = 4,
+        A_MERGE = 5,
+        A_EMPTY = 6,
+    }
 
     class Node {
         friend class CompressTree;
@@ -193,19 +147,19 @@ namespace cbt {
         // action and does not check. For example, perform(MERGE) will directly
         // sort/merge the buffer. The caller has to ensure that the buffer is
         // already decompressed.
-        void perform(const NodeState& state);
-        // Check if the node is currently scheduled for action state and block
-        // until receipt of signal indicating completion.
+        void perform(const NodeAction& action);
+        // Check if the node is currently in some state and block until receipt
+        // of signal indicating that the state has been reached.
         void wait(const NodeState& state);
-        // Signal that the state waited upon has been reached
-        void done(const NodeState& state);
-        // 
-        void schedule(const NodeState& act);
+        // Work that must be done on the completion of a certain action. This
+        // includes setting and resetting of state and schedule bitmasks as
+        // well as signalling the reaching of some state being waited upon
+        void done(const NodeAction& state);
+        // Queue a node for the performance of action act. This function takes
+        // care of checking whether the node must be queued and making
+        // appropriate changes to queueing masks
+        void schedule(const NodeAction& act);
 
-        // Ugh. This is required because a single compressor queue handles both
-        // compression and decompression. The Slave, unfortunately, needs to
-        // know which of these is being performed, and we don't want to expose
-        // the locking etc. to the Slave.
         bool canEmptyIntoNode();
 
       private:
@@ -225,22 +179,15 @@ namespace cbt {
 
         // Bit-masks that indicate the current state of the node and requested
         // actions respectively, along with locks to protect them
-        StateMask state_mask_;
-        StateMask schedule_mask_;
+        Mask state_mask_;
+        pthread_cond_t state_cond_;
+        pthread_mutex_t state_mask_mutex_;
 
-        pthread_cond_t emptyCond_;
-        pthread_mutex_t emptyMutex_;
+        Mask queue_mask_;
+        pthread_mutex_t queue_mask_mutex_;
 
-        pthread_cond_t sortCond_;
-        pthread_mutex_t sortMutex_;
-
-        pthread_cond_t compCond_;
-        pthread_mutex_t compMutex_;
-
-#ifdef ENABLE_PAGING
-        pthread_cond_t pageCond_;
-        pthread_mutex_t pageMutex_;
-#endif  // ENABLE_PAGING
+        Mask in_progress_mask_;
+        pthread_mutex_t in_progress_mask_mutex_;
     };
 }
 
