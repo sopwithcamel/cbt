@@ -84,7 +84,7 @@ namespace cbt {
             PartialAgg* agg = paos[i];
             if (inputNode_->isFull()) {
                 // add inputNode_ to be sorted
-                inputNode_->schedule(SORT);
+                inputNode_->schedule(A_SORT);
 
                 // get an empty root. This function can block until there are
                 // empty roots available
@@ -133,8 +133,8 @@ namespace cbt {
             assert(curLeaf->buffer_.lists_.size() == 1);
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(DECOMPRESS);
-            curLeaf->wait(DECOMPRESS);
+            curLeaf->schedule(A_DECOMPRESS);
+            curLeaf->wait(S_DECOMPRESSED);
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -153,7 +153,7 @@ namespace cbt {
         lastElement_++;
 
         if (lastElement_ >= curLeaf->buffer_.numElements()) {
-            curLeaf->schedule(COMPRESS);
+            curLeaf->schedule(A_COMPRESS);
             if (++lastLeafRead_ == allLeaves_.size()) {
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Emptying tree!\n");
@@ -171,8 +171,8 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(DECOMPRESS);
-            n->wait(DECOMPRESS);
+            n->schedule(A_DECOMPRESS);
+            n->wait(S_DECOMPRESSED);
             lastOffset_ = 0;
             lastElement_ = 0;
         }
@@ -221,7 +221,7 @@ namespace cbt {
         fprintf(stderr, "Starting to flush\n");
 
         emptyType_ = ALWAYS;
-        inputNode_->schedule(SORT);
+        inputNode_->schedule(A_SORT);
 
         int all_done;
         do {
@@ -286,15 +286,15 @@ namespace cbt {
             if (newLeaf && newLeaf->isFull()) {
                 l2 = newLeaf->splitLeaf();
             }
-            node->schedule(COMPRESS);
+            node->schedule(A_COMPRESS);
             if (newLeaf) {
-                newLeaf->schedule(COMPRESS);
+                newLeaf->schedule(A_COMPRESS);
             }
             if (l1) {
-                l1->schedule(COMPRESS);
+                l1->schedule(A_COMPRESS);
             }
             if (l2) {
-                l2->schedule(COMPRESS);
+                l2->schedule(A_COMPRESS);
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
@@ -346,8 +346,19 @@ namespace cbt {
     }
 
     bool CompressTree::rootNodeAvailable() {
-        if (!rootNode_->buffer_.empty() ||
-                !rootNode_->state_mask_.is_set(DEFAULT))
+        if (!rootNode_->buffer_.empty())
+            return false;
+        uint32_t t = 0;
+        bool ret = true;
+        pthread_mutex_lock(&rootNode_->queue_mask_mutex_);
+        ret &= (rootNode_->queue_mask_.or_mask(t) == t);
+        pthread_mutex_unlock(&rootNode_->queue_mask_mutex_);
+        if (!ret)
+            return false;
+        pthread_mutex_lock(&rootNode_->in_progress_mask_mutex_);
+        ret &= (rootNode_->in_progress_mask_.or_mask(t) == t);
+        pthread_mutex_unlock(&rootNode_->in_progress_mask_mutex_);
+        if (!ret)
             return false;
         return true;
     }
@@ -357,7 +368,7 @@ namespace cbt {
         Buffer temp;
         temp.lists_ = rootNode_->buffer_.lists_;
         rootNode_->buffer_.lists_ = n->buffer_.lists_;
-        rootNode_->schedule(EMPTY);
+        rootNode_->schedule(A_EMPTY);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Submitting node %d for emptying\n",
                 rootNode_->id());

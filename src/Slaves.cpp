@@ -275,7 +275,7 @@ namespace cbt {
     }
 
     void Sorter::work(Node* n) {
-        n->perform(SORT);
+        n->perform(A_SORT);
         addToSorted(n); 
     }
 
@@ -353,10 +353,10 @@ namespace cbt {
     }
 
     void Emptier::work(Node* n) {
-        n->wait(MERGE);
+        n->wait(S_AGGREGATED);
         bool is_root = n->isRoot();
 
-        n->perform(EMPTY);
+        n->perform(A_EMPTY);
 
         // No other node is dependent on the root. Performing this check also
         // avoids the problem, where perform() causes the creation of a new
@@ -371,7 +371,7 @@ namespace cbt {
         }
         
         // handle notifications
-        n->done(EMPTY);
+        n->done(A_EMPTY);
     }
 
     void Emptier::addNode(Node* node) {
@@ -409,26 +409,28 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        NodeState state;
-        if (n->schedule_mask_.is_set(COMPRESS))
-            state = COMPRESS;
+        NodeAction action;
+        pthread_mutex_lock(&n->queue_mask_mutex_);
+        if (n->queue_mask_.is_set(A_COMPRESS))
+            action = A_COMPRESS;
         else
-            state = DECOMPRESS;
-        n->perform(state);
-        n->done(state);
+            action = A_DECOMPRESS;
+        pthread_mutex_unlock(&n->queue_mask_mutex_);
+        n->perform(action);
+        n->done(action);
     }
 
-    void Compressor::addNode(Node* node) {
-        NodeState state;
-        if (node->schedule_mask_.is_set(COMPRESS))
-            state = COMPRESS;
-        else
-            state = DECOMPRESS;
-        if (state == COMPRESS) {
-            addNodeToQueue(node, /*priority=*/0);
+    void Compressor::addNode(Node* n) {
+        NodeAction action;
+        pthread_mutex_lock(&n->queue_mask_mutex_);
+        if (n->queue_mask_.is_set(A_COMPRESS)) {
+            action = A_COMPRESS;
+            addNodeToQueue(n, /*priority=*/0);
         } else {
-            addNodeToQueue(node, /*priority=*/node->level());
+            action = A_DECOMPRESS;
+            addNodeToQueue(n, /*priority=*/n->level());
         }
+        pthread_mutex_unlock(&n->queue_mask_mutex_);
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
@@ -453,13 +455,13 @@ namespace cbt {
 
     void Merger::work(Node* n) {
         // block until buffer is decompressed
-        n->wait(DECOMPRESS);
+        n->wait(S_DECOMPRESSED);
         // perform merge
-        n->perform(MERGE);
+        n->perform(A_MERGE);
         // schedule for emptying
-        n->schedule(EMPTY);
+        n->schedule(A_EMPTY);
         // indicate that we're done sorting
-        n->done(MERGE);
+        n->done(A_MERGE);
     }
 
     void Merger::addNode(Node* node) {

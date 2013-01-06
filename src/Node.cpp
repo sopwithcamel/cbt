@@ -104,21 +104,18 @@ namespace cbt {
     bool Node::emptyOrCompress() {
         bool ret = true;
         if (tree_->emptyType_ == ALWAYS) {
-            schedule(DECOMPRESS);
-            schedule(MERGE);
+            schedule(A_DECOMPRESS);
+            schedule(A_MERGE);
             return true;
         }
 
         uint32_t n = buffer_.numElements();        
         if (n < EMPTY_THRESHOLD * 0.75) {
-            schedule(COMPRESS);
+            schedule(A_COMPRESS);
         } else {
-            if (!schedule_mask_.is_set(DECOMPRESS) &&
-                    !state_mask_.is_set(DECOMPRESS)) {
-                schedule(DECOMPRESS);
-            }
+            schedule(A_DECOMPRESS);
             if (isFull()) {
-                schedule(MERGE);
+                schedule(A_MERGE);
             }
         }
         return ret;
@@ -141,7 +138,7 @@ namespace cbt {
                         %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
-                schedule(COMPRESS);
+                schedule(A_COMPRESS);
             }
             return true;
         }
@@ -257,8 +254,8 @@ namespace cbt {
         return ret;
     }
 
-    bool Node::aggregateBuffer(const NodeState& act) {
-        bool ret = buffer_.aggregate(act == SORT? true : false);
+    bool Node::aggregateBuffer(const NodeAction& act) {
+        bool ret = buffer_.aggregate(act == A_SORT? true : false);
         checkIntegrity();
         return ret;
     }
@@ -330,7 +327,8 @@ namespace cbt {
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
             uint32_t num) {
         // check if the node is still queued up for a previous compression
-        wait(COMPRESS);
+        // i wonder if we can get away without doing this.
+//        wait(S_COMPRESSED);
 
         // calculate offset
         uint32_t offset = 0;
@@ -475,34 +473,15 @@ namespace cbt {
         return id_;
     }
 
-    void Node::done(const NodeState& state) {
-        switch(state) {
-            case COMPRESS:
-            case DECOMPRESS:
-                {
-                    // Signal that we're done comp/decomp
-                    pthread_mutex_unlock(&compMutex_);
-                    pthread_cond_signal(&compCond_);
-                    pthread_mutex_unlock(&compMutex_);
-                }
-                break;
-            case SORT:
-            case MERGE:
-                {
-                    // Signal that we're done sorting
-                    pthread_mutex_lock(&sortMutex_);
-                    pthread_cond_signal(&sortCond_);
-                    pthread_mutex_unlock(&sortMutex_);
-                }
-                break;
-            case EMPTY:
-            default:
-                break;
-        }
+    void Node::done(const NodeAction& action) {
+        // Signal that we're done
+        pthread_mutex_unlock(&state_mask_mutex_);
+        pthread_cond_signal(&state_cond_);
+        pthread_mutex_unlock(&state_mask_mutex_);
     }
 
     void Node::schedule(const NodeAction& action) {
-        switch(state) {
+        switch(action) {
             case A_COMPRESS:
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
@@ -626,7 +605,7 @@ namespace cbt {
                     tree_->sorter_->wakeup();
                 }
                 break;
-            case MERGE:
+            case A_MERGE:
                 {
                     // schedule node for mergin
                     pthread_mutex_lock(&queue_mask_mutex_);
@@ -637,7 +616,7 @@ namespace cbt {
                     tree_->merger_->wakeup();
                 }
                 break;
-            case EMPTY:
+            case A_EMPTY:
                 {
                     // schedule node for mergin
                     pthread_mutex_lock(&queue_mask_mutex_);
@@ -666,7 +645,7 @@ namespace cbt {
         // change the status of the action from queued to in-progress
         pthread_mutex_lock(&queue_mask_mutex_);
         pthread_mutex_lock(&in_progress_mask_mutex_);
-        queue_mask_.unset(action)
+        queue_mask_.unset(action);
         in_progress_mask_.set(action);
         pthread_mutex_unlock(&in_progress_mask_mutex_);
         pthread_mutex_unlock(&queue_mask_mutex_);
@@ -734,7 +713,7 @@ namespace cbt {
 #endif  // ENABLE_ASSERT_CHECKS
                 if (state_mask_.is_set(S_DECOMPRESSED) ||
                         state_mask_.is_set(S_AGGREGATED)) {
-                    state_mask_.clear():
+                    state_mask_.clear();
                     state_mask_.set(S_COMPRESSED);
                 }
                 break;
@@ -786,7 +765,7 @@ namespace cbt {
 
         // unset action from in-progress mask
         pthread_mutex_lock(&in_progress_mask_mutex_);
-        in_progress_mask_.unset(state);
+        in_progress_mask_.unset(action);
         pthread_mutex_unlock(&in_progress_mask_mutex_);
 
         if (action == A_EMPTY && rootFlag) {
@@ -796,12 +775,40 @@ namespace cbt {
 
     bool Node::canEmptyIntoNode() {
         bool ret = true;
-        uint32_t schedule_test_mask = 7;
-        uint32_t state_test_mask = 7;
-        ret &= (schedule_mask_.or_mask(schedule_test_mask) ==
-                schedule_test_mask);        
+        // it is ok to be in the following states to accept a new list from the
+        // emptying parent
+        Mask state_test_mask;
+        state_test_mask.set(S_EMPTY);
+        state_test_mask.set(S_DECOMPRESSED);
+        state_test_mask.set(S_COMPRESSED);
+
+        // it is ok to be compressing or paging when adding a new list into the
+        // buffer
+        Mask in_progress_test_mask;
+        in_progress_test_mask.set(A_DECOMPRESS);
+        in_progress_test_mask.set(A_COMPRESS);
+#ifdef ENABLE_PAGING
+        in_progress_test_mask.set(A_PAGEOUT);
+        in_progress_test_mask.set(A_PAGEIN);
+#endif  // ENABLE_PAGING
+
+        // same for the queue mask
+        Mask queue_test_mask = in_progress_test_mask;
+
+        pthread_mutex_lock(&queue_mask_mutex_);
+        ret &= (queue_mask_.or_mask(queue_test_mask) ==
+                queue_test_mask);        
+        pthread_mutex_unlock(&queue_mask_mutex_);
+
+        pthread_mutex_lock(&in_progress_mask_mutex_);
+        ret &= (in_progress_mask_.or_mask(in_progress_test_mask) ==
+                in_progress_test_mask);        
+        pthread_mutex_unlock(&in_progress_mask_mutex_);
+
+        pthread_mutex_lock(&state_mask_mutex_);
         ret &= (state_mask_.or_mask(state_test_mask) ==
                 state_test_mask);        
+        pthread_mutex_unlock(&state_mask_mutex_);
         return ret;
     }
 

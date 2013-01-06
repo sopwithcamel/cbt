@@ -1,4 +1,173 @@
-}
+// Copyright (C) 2012 Georgia Institute of Technology
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+// ---
+// Author: Hrishikesh Amur
+
+#include <assert.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sstream>
+#include "Buffer.h"
+#include "CompressTree.h"
+#include "compsort.h"
+#include "rle.h"
+#include "snappy.h"
+#include "lz4.h"
+
+namespace cbt {
+    Buffer::List::List() :
+            hashes_(NULL),
+            sizes_(NULL),
+            data_(NULL),
+            num_(0),
+            size_(0),
+            state_(DECOMPRESSED),
+            c_hashlen_(0),
+            c_sizelen_(0),
+            c_datalen_(0) {
+    }
+
+    Buffer::List::~List() {
+        deallocate();
+    }
+
+    void Buffer::List::allocate(bool isLarge) {
+        uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
+        uint32_t buf = cbt::BUFFER_SIZE;
+        if (isLarge) {
+            nel *= 2;
+            buf *= 2;
+        }
+        hashes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
+        sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
+        data_ = reinterpret_cast<char*>(malloc(buf));
+    }
+
+    void Buffer::List::deallocate() {
+        if (hashes_) {
+            free(hashes_);
+            hashes_ = NULL;
+        }
+        if (sizes_) {
+            free(sizes_);
+            sizes_ = NULL;
+        }
+        if (data_) {
+            free(data_);
+            data_ = NULL;
+        }
+    }
+
+    void Buffer::List::setEmpty() {
+        num_ = 0;
+        size_ = 0;
+        state_ = DECOMPRESSED;
+    }
+
+    Buffer::Buffer() :
+            compressible_(true) {
+    }
+
+    Buffer::~Buffer() {
+        deallocate();
+    }
+
+    Buffer::List* Buffer::addList(bool isLarge/* = false */) {
+        List *l = new List();
+        l->allocate(isLarge);
+        lists_.push_back(l);
+        return l;
+    }
+
+    void Buffer::delList(uint32_t ind) {
+        if (ind < lists_.size()) {
+            delete lists_[ind];
+            lists_.erase(lists_.begin() + ind);
+        }
+    }
+
+    void Buffer::addList(Buffer::List* l) {
+        lists_.push_back(l);
+    }
+
+    void Buffer::clear() {
+        lists_.clear();
+    }
+
+    void Buffer::deallocate() {
+        for (uint32_t i = 0; i < lists_.size(); ++i)
+            delete lists_[i];
+        lists_.clear();
+    }
+
+    bool Buffer::empty() const {
+        return (numElements() == 0);
+    }
+
+    uint32_t Buffer::numElements() const {
+        uint32_t num = 0;
+        for (uint32_t i = 0; i < lists_.size(); ++i)
+            num += lists_[i]->num_;
+        return num;
+    }
+
+    void Buffer::setParent(Node* n) {
+        node_ = n;
+    }
+
+    void Buffer::quicksort(uint32_t uleft, uint32_t uright) {
+        int32_t i, j, stack_pointer = -1;
+        int32_t left = uleft;
+        int32_t right = uright;
+        int32_t* rstack = new int32_t[128];
+        uint32_t swap, temp;
+        uint32_t sizs, sizt;
+        char *pers, *pert;
+        uint32_t* arr = lists_[0]->hashes_;
+        uint32_t* siz = lists_[0]->sizes_;
+        while (true) {
+            if (right - left <= 7) {
+                for (j = left + 1; j <= right; j++) {
+                    swap = arr[j];
+                    sizs = siz[j];
+                    pers = perm_[j];
+                    i = j - 1;
+                    if (i < 0) {
+                        fprintf(stderr, "Noo");
+                        assert(false);
+                    }
+                    while (i >= left && (arr[i] > swap)) {
+                        arr[i + 1] = arr[i];
+                        siz[i + 1] = siz[i];
+                        perm_[i + 1] = perm_[i];
+                        i--;
+                    }
+                    arr[i + 1] = swap;
+                    siz[i + 1] = sizs;
+                    perm_[i + 1] = pers;
+                }
+                if (stack_pointer == -1) {
+                    break;
+                }
                 right = rstack[stack_pointer--];
                 left = rstack[stack_pointer--];
             } else {

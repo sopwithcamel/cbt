@@ -31,6 +31,7 @@
 #include "CompressTree.h"
 #include "Config.h"
 #include "PartialAgg.h"
+#include "Mask.h"
 
 namespace cbt {
 
@@ -64,7 +65,7 @@ namespace cbt {
         A_SORT = 4,
         A_MERGE = 5,
         A_EMPTY = 6,
-    }
+    };
 
     class Node {
         friend class CompressTree;
@@ -116,7 +117,7 @@ namespace cbt {
         /* Merge the buffer based on hash value */
         bool mergeBuffer();
         /* Aggregate the sorted/merged buffer */
-        bool aggregateBuffer(const NodeState& act);
+        bool aggregateBuffer(const NodeAction& act);
         /* copy contents from node's buffer into this buffer. Starting from
          * index = index, copy num elements' data.
          */

@@ -124,7 +124,7 @@ namespace cbt {
         void post(Node* n) {
             // If parent is present, it must be in the disabled queue.
             // remove n from its parent's dependency list
-            if (n->parent_ && n->parent_->schedule_mask_.is_set(EMPTY)) {
+            if (n->parent_) {
                 DisabledDAG::iterator parent_it = disabNodes_.find(n->parent_);
                 if (parent_it != disabNodes_.end()) {
                     std::set<uint32_t>* ch = parent_it->second;
