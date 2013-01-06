@@ -207,13 +207,6 @@ namespace cbt {
         // know which of these is being performed, and we don't want to expose
         // the locking etc. to the Slave.
         bool canEmptyIntoNode();
-        bool checkScheduleSync(const NodeState& state);
-
-        // Synchronized functions to get and set state and schedule masks.
-        bool setState(uint32_t mask);
-        uint32_t getState() const;
-        bool setSchedule(uint32_t mask);
-        uint32_t getSchedule() const;
 
       private:
         /* pointer to the tree */

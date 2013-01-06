@@ -129,15 +129,6 @@ namespace cbt {
         return ret;
     }
 
-    bool Node::spillBuffer() {
-#ifdef ENABLE_PAGING
-        schedule(PAGEIN);
-#else
-        schedule(DECOMPRESS);
-#endif  // ENABLE_PAGING
-        return true;
-    }
-
     bool Node::emptyBuffer() {
         uint32_t curChild = 0;
         uint32_t curElement = 0;
