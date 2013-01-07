@@ -368,6 +368,14 @@ namespace cbt {
         Buffer temp;
         temp.lists_ = rootNode_->buffer_.lists_;
         rootNode_->buffer_.lists_ = n->buffer_.lists_;
+
+        // set the right state bits
+        pthread_mutex_lock(&rootNode_->state_mask_mutex_);
+        rootNode_->state_mask_.unset(S_EMPTY);
+        rootNode_->state_mask_.set(S_AGGREGATED);
+        pthread_mutex_unlock(&rootNode_->state_mask_mutex_);
+
+        // schedule root node for emptying
         rootNode_->schedule(A_EMPTY);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Submitting node %d for emptying\n",

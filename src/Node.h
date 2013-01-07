@@ -168,7 +168,9 @@ namespace cbt {
         CompressTree* tree_;
         /* Buffer */
         Buffer buffer_;
-        pthread_mutex_t stateMutex_;
+        // lock to prevent multiple actions modifying buffer state at the same
+        // time
+        pthread_spinlock_t buffer_lock_;
         uint32_t id_;
         /* level in the tree; 0 at leaves and increases upwards */
         uint32_t level_;

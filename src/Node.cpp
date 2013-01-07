@@ -48,6 +48,7 @@ namespace cbt {
         // set initial state as S_EMPTY
         state_mask_.set(S_EMPTY);
     
+        pthread_spin_init(&buffer_lock_, PTHREAD_PROCESS_PRIVATE);
         pthread_mutex_init(&state_mask_mutex_, NULL);
         pthread_mutex_init(&queue_mask_mutex_, NULL);
         pthread_mutex_init(&in_progress_mask_mutex_, NULL);
@@ -59,6 +60,7 @@ namespace cbt {
     }
 
     Node::~Node() {
+        pthread_spin_destroy(&buffer_lock_);
         pthread_mutex_destroy(&state_mask_mutex_);
         pthread_cond_destroy(&state_cond_);
 
@@ -360,6 +362,14 @@ namespace cbt {
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;
+
+        pthread_mutex_lock(&state_mask_mutex_);
+        if (state_mask_.is_set(S_EMPTY)) {
+            state_mask_.unset(S_EMPTY);
+            state_mask_.set(S_DECOMPRESSED);
+        }
+        pthread_mutex_unlock(&state_mask_mutex_);
+
         checkSerializationIntegrity(buffer_.lists_.size()-1);
         buffer_.checkSortIntegrity(l);
         return true;
@@ -500,10 +510,15 @@ namespace cbt {
                     pthread_mutex_unlock(&in_progress_mask_mutex_);
 #endif  // ENABLE_ASSERT_CHECKS
 
-                    // if not already queued for compression, then schedule for
-                    // compression
+                    // we need to check if compression has already been
+                    // scheduled. This means that the node could still be
+                    // queued, or compression could be in progress
                     pthread_mutex_lock(&queue_mask_mutex_);
-                    if (!queue_mask_.is_set(A_COMPRESS)) {
+                    bool add_node = true;
+                    if (in_progress_mask_.is_set(A_COMPRESS) ||
+                            queue_mask_.is_set(A_COMPRESS))
+                        add_node = false;
+                    if (add_node) {
                         queue_mask_.set(A_COMPRESS);
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
@@ -514,27 +529,38 @@ namespace cbt {
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
                         return;
-                    // if the node is queued for compression, we cancel this.
+
+                    bool add_node;
+                    pthread_mutex_lock(&queue_mask_mutex_);
+                    // if compression is queued then cancel it. This means,
+                    // however, that the node is already queued in the
+                    // compressor, so no need to queue again.
                     // We still need to schedule decompression, because there
                     // may be some lists in the buffer which are already
                     // compressed.
-                    pthread_mutex_lock(&queue_mask_mutex_);
-                    queue_mask_.set(A_DECOMPRESS);
-
-#ifdef ENABLE_ASSERT_CHECKS
-                    // we shouldn't be decompressing twice
-                    if (queue_mask_.is_set(A_DECOMPRESS)) {
-                        assert(false && "Decompressing twice");
-                    }
-#endif  // ENABLE_ASSERT_CHECKS
-
-                    if (!queue_mask_.is_set(A_COMPRESS)) {
+                    if (queue_mask_.is_set(A_COMPRESS)) {
                         queue_mask_.unset(A_COMPRESS);
+                        queue_mask_.set(A_DECOMPRESS);
+                        add_node = false;    
                     } else {
+                        // we need to check if decompression has already been
+                        // scheduled. This means that the node could still be
+                        // queued, decompression could be in progress, or could
+                        // have completed.
+                        if (state_mask_.is_set(S_DECOMPRESSED) || 
+                                in_progress_mask_.is_set(A_DECOMPRESS) ||
+                                queue_mask_.is_set(A_DECOMPRESS)) {
+                            add_node = false;
+                        } else {
+                            add_node = true;
+                            queue_mask_.set(A_DECOMPRESS);
+                        }
+                    }
+                    pthread_mutex_unlock(&queue_mask_mutex_);
+                    if (add_node) {
                         tree_->compressor_->addNode(this);
                         tree_->compressor_->wakeup();
                     }
-                    pthread_mutex_unlock(&queue_mask_mutex_);
                 }
                 break;
 #ifdef ENABLE_PAGING
@@ -634,7 +660,7 @@ namespace cbt {
 
     void Node::wait(const NodeState& state) {
         pthread_mutex_lock(&state_mask_mutex_);
-        while (state_mask_.is_set(state))
+        while (!state_mask_.is_set(state))
             pthread_cond_wait(&state_cond_, &state_mask_mutex_);
         pthread_mutex_unlock(&state_mask_mutex_);
     }
@@ -644,12 +670,15 @@ namespace cbt {
 
         // change the status of the action from queued to in-progress
         pthread_mutex_lock(&queue_mask_mutex_);
-        pthread_mutex_lock(&in_progress_mask_mutex_);
         queue_mask_.unset(action);
-        in_progress_mask_.set(action);
-        pthread_mutex_unlock(&in_progress_mask_mutex_);
         pthread_mutex_unlock(&queue_mask_mutex_);
 
+        // we hold the in-progress lock across the whole action for protection
+        pthread_mutex_lock(&in_progress_mask_mutex_);
+        in_progress_mask_.set(action);
+        pthread_mutex_unlock(&in_progress_mask_mutex_);
+
+        pthread_spin_lock(&buffer_lock_);
         switch (action) {
             case A_COMPRESS:
                 buffer_.compress();
@@ -678,8 +707,6 @@ namespace cbt {
             case A_EMPTY:
 #ifdef ENABLE_ASSERT_CHECKS
                 pthread_mutex_lock(&state_mask_mutex_);
-                assert(state_mask_.is_set(S_DECOMPRESSED) &&
-                        "Node not decompressed!");
                 assert(state_mask_.is_set(S_AGGREGATED) &&
                         "Node not aggregated!");
                 pthread_mutex_unlock(&state_mask_mutex_);
@@ -691,15 +718,12 @@ namespace cbt {
             default:
                 assert(false && "Illegal state");
         }
+        pthread_spin_unlock(&buffer_lock_);
 
         pthread_mutex_lock(&state_mask_mutex_);
         // set state
         switch(action) {
             case A_DECOMPRESS:
-#ifdef ENABLE_ASSERT_CHECKS
-                assert(state_mask_.is_set(S_COMPRESSED) &&
-                        "A_DECOMPRESS only valid from S_COMPRESSED");
-#endif  // ENABLE_ASSERT_CHECKS
                 // clear the current mask
                 state_mask_.clear();
                 state_mask_.set(S_DECOMPRESSED);
@@ -738,8 +762,9 @@ namespace cbt {
             case A_SORT:
             case A_MERGE:
 #ifdef ENABLE_ASSERT_CHECKS
-                assert(state_mask_.is_set(S_DECOMPRESSED) &&
-                        "A_SORT and A_MERGE only valid from S_DECOMPRESSED");
+                if (!rootFlag)
+                    assert(state_mask_.is_set(S_DECOMPRESSED) &&
+                            "A_SORT and A_MERGE only valid from S_DECOMPRESSED");
 #endif  // ENABLE_ASSERT_CHECKS
                 state_mask_.clear();
                 state_mask_.set(S_AGGREGATED);
@@ -775,12 +800,6 @@ namespace cbt {
 
     bool Node::canEmptyIntoNode() {
         bool ret = true;
-        // it is ok to be in the following states to accept a new list from the
-        // emptying parent
-        Mask state_test_mask;
-        state_test_mask.set(S_EMPTY);
-        state_test_mask.set(S_DECOMPRESSED);
-        state_test_mask.set(S_COMPRESSED);
 
         // it is ok to be compressing or paging when adding a new list into the
         // buffer
@@ -805,10 +824,6 @@ namespace cbt {
                 in_progress_test_mask);        
         pthread_mutex_unlock(&in_progress_mask_mutex_);
 
-        pthread_mutex_lock(&state_mask_mutex_);
-        ret &= (state_mask_.or_mask(state_test_mask) ==
-                state_test_mask);        
-        pthread_mutex_unlock(&state_mask_mutex_);
         return ret;
     }
 

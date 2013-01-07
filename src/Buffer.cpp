@@ -574,7 +574,13 @@ namespace cbt {
             // allocate memory for one list
             Buffer compressed;
 
-            for (uint32_t i = 0; i < lists_.size(); ++i) {
+            // we don't use lists_.size() in the for loop condition because
+            // lists are possibly being added during compression. We don't want
+            // the new lists to be processed as this leads to the compress()
+            // function not returning for a long time.
+            uint32_t num_lists = lists_.size();
+
+            for (uint32_t i = 0; i < num_lists; ++i) {
                 Buffer::List* l = lists_[i];
                 if (l->state_ == Buffer::List::COMPRESSED)
                     continue;

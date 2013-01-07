@@ -410,19 +410,16 @@ namespace cbt {
 
     void Compressor::work(Node* n) {
         NodeAction action;
-        pthread_mutex_lock(&n->queue_mask_mutex_);
         if (n->queue_mask_.is_set(A_COMPRESS))
             action = A_COMPRESS;
         else
             action = A_DECOMPRESS;
-        pthread_mutex_unlock(&n->queue_mask_mutex_);
         n->perform(action);
         n->done(action);
     }
 
     void Compressor::addNode(Node* n) {
         NodeAction action;
-        pthread_mutex_lock(&n->queue_mask_mutex_);
         if (n->queue_mask_.is_set(A_COMPRESS)) {
             action = A_COMPRESS;
             addNodeToQueue(n, /*priority=*/0);
@@ -430,7 +427,6 @@ namespace cbt {
             action = A_DECOMPRESS;
             addNodeToQueue(n, /*priority=*/n->level());
         }
-        pthread_mutex_unlock(&n->queue_mask_mutex_);
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
