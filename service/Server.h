@@ -29,6 +29,20 @@
 #include "CompressTree.h"
 
 namespace cbtservice {
+    struct WCSorter {
+      public:
+        WCSorter(const Operations* ops) : ops_(ops) {}
+        ~WCSorter() {}
+        bool operator()(PartialAgg* p1, PartialAgg* p2) {
+            int a = (intptr_t)(ops_->getValue(p1));
+            int b = (intptr_t)(ops_->getValue(p2));
+            return a > b;
+        }
+      private:
+        const Operations* ops_;
+        
+    };
+
     class CBTServer {
       public:
         static CBTServer* Instance();

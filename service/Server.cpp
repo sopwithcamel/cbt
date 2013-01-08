@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <gflags/gflags.h>
 #include <gperftools/heap-profiler.h>
 #include <google/protobuf/io/coded_stream.h>
@@ -145,12 +146,17 @@ namespace cbtservice {
             OstreamOutputStream* os = new OstreamOutputStream(&ss);
             CodedOutputStream* cs = new CodedOutputStream(os);
 
-            //  2. read the results from the CBT
+            //  2. read the results from the CBT and sort them. For now, this
+            //  is being sorted in decreasing order of the values which doesn't
+            //  work for all applications. We need a way to make this general.
             uint64_t num_read;
             bool remain = cbt_->bulk_read(send_paos_, num_read,
                     kMaxUniquePAOs);
             if (remain)
                 fprintf(stderr, "More results remaining\n");
+            WCSorter* sorter = new WCSorter(to_);
+            std::sort(send_paos_, send_paos_ + num_read, *sorter);
+            delete sorter;
 
             //  3. serialize results to the stream
             for (uint32_t i = 0; i < num_read; ++i) {
@@ -263,7 +269,7 @@ int main (int argc, char** argv) {
         sleep(1);
     }
 
-    signal(SIGINT, INThandler);
+//    signal(SIGINT, INThandler);
 
 /*
     if (FLAGS_heapcheck)
