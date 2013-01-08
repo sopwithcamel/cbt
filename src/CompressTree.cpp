@@ -133,6 +133,9 @@ namespace cbt {
             assert(curLeaf->buffer_.lists_.size() == 1);
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
+#ifdef ENABLE_PAGING
+            curLeaf->schedule(A_PAGEIN);
+#endif  // ENABLE_PAGING
             curLeaf->schedule(A_DECOMPRESS);
             curLeaf->wait(S_DECOMPRESSED);
         }
@@ -171,6 +174,9 @@ namespace cbt {
             Node *n = allLeaves_[lastLeafRead_];
             while (curLeaf->buffer_.numElements() == 0)
                 curLeaf = allLeaves_[++lastLeafRead_];
+#ifdef ENABLE_PAGING
+            n->schedule(A_PAGEIN);
+#endif  // ENABLE_PAGING
             n->schedule(A_DECOMPRESS);
             n->wait(S_DECOMPRESSED);
             lastOffset_ = 0;
@@ -287,21 +293,31 @@ namespace cbt {
                 l2 = newLeaf->splitLeaf();
             }
             node->schedule(A_COMPRESS);
+#ifdef ENABLE_PAGING
+            node->schedule(A_PAGEOUT);
+#endif  // ENABLE_PAGING
             if (newLeaf) {
                 newLeaf->schedule(A_COMPRESS);
+#ifdef ENABLE_PAGING
+                newLeaf->schedule(A_PAGEOUT);
+#endif  // ENABLE_PAGING
             }
             if (l1) {
                 l1->schedule(A_COMPRESS);
+#ifdef ENABLE_PAGING
+                l1->schedule(A_PAGEOUT);
+#endif  // ENABLE_PAGING
             }
             if (l2) {
                 l2->schedule(A_COMPRESS);
+#ifdef ENABLE_PAGING
+                l2->schedule(A_PAGEOUT);
+#endif  // ENABLE_PAGING
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
                     node->id_);
 #endif
-            // % WHY?
-            //node->setQueueStatus(NONE);
         }
     }
 
@@ -350,14 +366,14 @@ namespace cbt {
             return false;
         Mask t;
         bool ret = true;
-        pthread_mutex_lock(&rootNode_->queue_mask_mutex_);
+        pthread_mutex_lock(&rootNode_->mask_mutex_);
         ret &= (rootNode_->queue_mask_.or_mask(t) == t);
-        pthread_mutex_unlock(&rootNode_->queue_mask_mutex_);
+        pthread_mutex_unlock(&rootNode_->mask_mutex_);
         if (!ret)
             return false;
-        pthread_mutex_lock(&rootNode_->in_progress_mask_mutex_);
+        pthread_mutex_lock(&rootNode_->mask_mutex_);
         ret &= (rootNode_->in_progress_mask_.or_mask(t) == t);
-        pthread_mutex_unlock(&rootNode_->in_progress_mask_mutex_);
+        pthread_mutex_unlock(&rootNode_->mask_mutex_);
         if (!ret)
             return false;
         return true;
@@ -370,10 +386,10 @@ namespace cbt {
         rootNode_->buffer_.lists_ = n->buffer_.lists_;
 
         // set the right state bits
-        pthread_mutex_lock(&rootNode_->state_mask_mutex_);
+        pthread_mutex_lock(&rootNode_->mask_mutex_);
         rootNode_->state_mask_.unset(S_EMPTY);
         rootNode_->state_mask_.set(S_AGGREGATED);
-        pthread_mutex_unlock(&rootNode_->state_mask_mutex_);
+        pthread_mutex_unlock(&rootNode_->mask_mutex_);
 
         // schedule root node for emptying
         rootNode_->schedule(A_EMPTY);
@@ -488,6 +504,9 @@ namespace cbt {
         newRoot->buffer_.addList();
         newRoot->separator_ = UINT32_MAX;
         newRoot->buffer_.setCompressible(false);
+#ifdef ENABLE_PAGING
+        newRoot->buffer_.setPageable(false);
+#endif  // ENABLE_PAGING
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d is new root; children are %d and %d\n",
                 newRoot->id_, rootNode_->id_, otherChild->id_);

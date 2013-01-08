@@ -369,9 +369,6 @@ namespace cbt {
             queue_.post(n);
             pthread_spin_unlock(&nodesLock_);
         }
-        
-        // handle notifications
-        n->done(A_EMPTY);
     }
 
     void Emptier::addNode(Node* node) {
@@ -409,13 +406,21 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        NodeAction action;
-        if (n->queue_mask_.is_set(A_COMPRESS))
-            action = A_COMPRESS;
-        else
-            action = A_DECOMPRESS;
-        n->perform(action);
-        n->done(action);
+        if (n->queue_mask_.is_set(A_COMPRESS)) {
+            n->perform(A_COMPRESS);
+        } else if (n->queue_mask_.is_set(A_DECOMPRESS)) {
+            do {
+                n->wait(S_COMPRESSED);
+                if (n->in_progress_mask_.is_set(A_PAGEOUT)) {
+                    n->wait(S_PAGED_OUT);
+                    continue;
+                }
+                break;
+            } while(true);
+                
+            // decompression is never cancelled, so no need to check that
+            n->perform(A_DECOMPRESS);
+        }
     }
 
     void Compressor::addNode(Node* n) {
@@ -423,10 +428,11 @@ namespace cbt {
         if (n->queue_mask_.is_set(A_COMPRESS)) {
             action = A_COMPRESS;
             addNodeToQueue(n, /*priority=*/0);
-        } else {
+        } else if (n->queue_mask_.is_set(A_DECOMPRESS)) {
             action = A_DECOMPRESS;
             addNodeToQueue(n, /*priority=*/n->level());
-        }
+        } else
+            assert(false && "Some action is necessary");
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "adding node %d (size: %u) to %s: ",
@@ -451,13 +457,19 @@ namespace cbt {
 
     void Merger::work(Node* n) {
         // block until buffer is decompressed
-        n->wait(S_DECOMPRESSED);
+        do {
+            n->wait(S_DECOMPRESSED);
+            if (n->in_progress_mask_.is_set(A_COMPRESS)) {
+                n->wait(S_COMPRESSED);
+                continue;
+            }
+            break;
+        } while (true);
+            
         // perform merge
         n->perform(A_MERGE);
         // schedule for emptying
         n->schedule(A_EMPTY);
-        // indicate that we're done sorting
-        n->done(A_MERGE);
     }
 
     void Merger::addNode(Node* node) {
@@ -476,4 +488,50 @@ namespace cbt {
     std::string Merger::getSlaveName() const {
         return "Merger";
     }
+
+#ifdef ENABLE_PAGING
+    // Pager
+    Pager::Pager(CompressTree* tree) :
+        Slave(tree) {
+        }
+
+    Pager::~Pager() {
+    }
+
+
+    void Pager::work(Node* n) {
+        if (n->queue_mask_.is_set(A_PAGEIN)) {
+            n->perform(A_PAGEIN);
+        } else if (n->queue_mask_.is_set(A_PAGEOUT)) {
+            n->wait(S_COMPRESSED);
+#ifdef ENABLE_ASSERT_CHECKS
+            assert(n->state_mask_.is_set(S_COMPRESSED));
+#endif  // ENABLE_ASSERT_CHECKS
+            // check that the action has not been cancelled while waiting
+            if (n->queue_mask_.is_set(A_PAGEOUT))
+                n->perform(A_PAGEOUT);
+        }
+    }
+
+    void Pager::addNode(Node* n) {
+        NodeAction action;
+        if (n->queue_mask_.is_set(A_PAGEOUT)) {
+            action = A_PAGEOUT;
+            addNodeToQueue(n, /*priority=*/0);
+        } else if (n->queue_mask_.is_set(A_PAGEIN)) {
+            action = A_PAGEIN;
+            addNodeToQueue(n, /*priority=*/n->level());
+        } else
+            assert(false);
+
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "Node %d added to page list: ", n->id_);
+        printElements();
+#endif  // CT_NODE_DEBUG
+    }
+
+    std::string Pager::getSlaveName() const {
+        return "Pager";
+    }
+#endif  // ENABLE_PAGING
 }

@@ -116,6 +116,13 @@ namespace cbt {
           void setCompressible(bool flag);
           bool checkSortIntegrity(List* l);
 
+#ifdef ENABLE_PAGING
+          /* Paging-related */
+          bool pageOut();
+          bool pageIn();
+          void setPageable(bool flag);
+#endif  // ENABLE_PAGING
+
         private:
           const Node* node_;
           /* buffer fragments */
@@ -129,6 +136,7 @@ namespace cbt {
 #ifdef ENABLE_PAGING
           /* Paging-related */
           FILE* f_;
+          bool pageable_;
 #endif  // ENABLE_PAGING
     };
 }

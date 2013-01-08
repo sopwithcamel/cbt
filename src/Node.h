@@ -53,6 +53,7 @@ namespace cbt {
         // At least one list is paged-out; the rest are decompressed or
         // compressed
         S_PAGED_OUT = 4,
+        NUMBER_OF_STATES = 5,
     };
 
     enum NodeAction {
@@ -65,6 +66,7 @@ namespace cbt {
         A_SORT = 4,
         A_MERGE = 5,
         A_EMPTY = 6,
+        NUMBER_OF_ACTIONS = 7,
     };
 
     class Node {
@@ -152,10 +154,9 @@ namespace cbt {
         // Check if the node is currently in some state and block until receipt
         // of signal indicating that the state has been reached.
         void wait(const NodeState& state);
-        // Work that must be done on the completion of a certain action. This
-        // includes setting and resetting of state and schedule bitmasks as
-        // well as signalling the reaching of some state being waited upon
-        void done(const NodeAction& state);
+        // Work that must be done when a certain state is reached. Currently
+        // includes signalling waiting threads
+        void done(const NodeState& state);
         // Queue a node for the performance of action act. This function takes
         // care of checking whether the node must be queued and making
         // appropriate changes to queueing masks
@@ -180,17 +181,15 @@ namespace cbt {
         std::vector<Node*> children_;
         uint32_t separator_;
 
+        pthread_cond_t state_cond_[NUMBER_OF_STATES];
+        pthread_mutex_t state_cond_mutex_[NUMBER_OF_STATES];
+
         // Bit-masks that indicate the current state of the node and requested
         // actions respectively, along with locks to protect them
         Mask state_mask_;
-        pthread_cond_t state_cond_;
-        pthread_mutex_t state_mask_mutex_;
-
         Mask queue_mask_;
-        pthread_mutex_t queue_mask_mutex_;
-
         Mask in_progress_mask_;
-        pthread_mutex_t in_progress_mask_mutex_;
+        pthread_mutex_t mask_mutex_;
     };
 }
 

@@ -84,7 +84,7 @@ namespace cbt {
     }
 
     Buffer::Buffer() :
-            compressible_(true) {
+            compressible_(true), pageable_(true) {
     }
 
     Buffer::~Buffer() {
@@ -789,9 +789,7 @@ namespace cbt {
     }
 
     void Buffer::setPageable(bool flag) {
-        pthread_mutex_lock(&pageMutex_);
         pageable_ = flag;
-        pthread_mutex_unlock(&pageMutex_);
     }
 
     void Buffer::setupPaging() {
