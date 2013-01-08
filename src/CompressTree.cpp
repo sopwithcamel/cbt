@@ -60,6 +60,7 @@ namespace cbt {
 
         pthread_mutex_init(&emptyRootNodesMutex_, NULL);
 
+        tree_prefix_ = rand();
 #ifdef ENABLE_COUNTERS
         monitor_ = NULL;
 #endif
@@ -374,17 +375,11 @@ namespace cbt {
         rootNode_->buffer_.addList();
         rootNode_->separator_ = UINT32_MAX;
         rootNode_->buffer_.setCompressible(false);
-#ifdef ENABLE_PAGING
-        rootNode_->buffer_.setPageable(false);
-#endif  // ENABLE_PAGING
 
         inputNode_ = new Node(this, 0);
         inputNode_->buffer_.addList();
         inputNode_->separator_ = UINT32_MAX;
         inputNode_->buffer_.setCompressible(false);
-#ifdef ENABLE_PAGING
-        inputNode_->buffer_.setPageable(false);
-#endif  // ENABLE_PAGING
 
         uint32_t number_of_root_nodes = 4;
         for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
@@ -392,9 +387,6 @@ namespace cbt {
             n->buffer_.addList();
             n->separator_ = UINT32_MAX;
             n->buffer_.setCompressible(false);
-#ifdef ENABLE_PAGING
-            n->buffer_.setPageable(false);
-#endif  // ENABLE_PAGING
             emptyRootNodes_.push_back(n);
         }
 
@@ -408,10 +400,6 @@ namespace cbt {
         // One for the inserter
         uint32_t threadCount = mergerThreadCount + compressorThreadCount +
                 emptierThreadCount + sorterThreadCount + 1;
-#ifdef ENABLE_PAGING
-        uint32_t pagerThreadCount = 1;
-        threadCount += pagerThreadCount;
-#endif
 #ifdef ENABLE_COUNTERS
         uint32_t monitorThreadCount = 1;
         threadCount += monitorThreadCount;
@@ -430,11 +418,6 @@ namespace cbt {
 
         emptier_ = new Emptier(this);
         emptier_->startThreads(emptierThreadCount);
-
-#ifdef ENABLE_PAGING
-        pager_ = new Pager(this);
-        pager_->startThreads(pagerThreadCount);
-#endif
 
 #ifdef ENABLE_COUNTERS
         monitor_ = new Monitor(this);
@@ -455,9 +438,6 @@ namespace cbt {
         sorter_->stopThreads();
         emptier_->stopThreads();
         compressor_->stopThreads();
-#ifdef ENABLE_PAGING
-        pager_->stopThreads();
-#endif
 #ifdef ENABLE_COUNTERS
         monitor_->stopThreads();
 #endif

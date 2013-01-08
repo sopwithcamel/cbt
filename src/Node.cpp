@@ -54,11 +54,7 @@ namespace cbt {
         pthread_mutex_init(&compMutex_, NULL);
         pthread_cond_init(&compCond_, NULL);
 
-#ifdef ENABLE_PAGING
         buffer_.setupPaging();
-        pthread_mutex_init(&pageMutex_, NULL);
-        pthread_cond_init(&pageCond_, NULL);
-#endif  // ENABLE_PAGING
     }
 
     Node::~Node() {
@@ -67,11 +63,8 @@ namespace cbt {
 
         pthread_mutex_destroy(&compMutex_);
         pthread_cond_destroy(&compCond_);
-#ifdef ENABLE_PAGING
-        pthread_mutex_destroy(&pageMutex_);
-        pthread_cond_destroy(&pageCond_);
+
         buffer_.cleanupPaging();
-#endif  // ENABLE_PAGING
     }
 
     bool Node::insert(PartialAgg* agg) {
@@ -322,9 +315,6 @@ namespace cbt {
         // if leaf is also the root, create new root
         if (isRoot()) {
             buffer_.setCompressible(true);
-#ifdef ENABLE_PAGING
-            buffer_.setPageable(true);
-#endif  // ENABLE_PAGING
             tree_->createNewRoot(newLeaf);
         } else {
             parent_->addChild(newLeaf);
@@ -456,9 +446,6 @@ namespace cbt {
 
         if (isRoot()) {
             buffer_.setCompressible(true);
-#ifdef ENABLE_PAGING
-            buffer_.setPageable(true);
-#endif  // ENABLE_PAGING
             buffer_.deallocate();
             return tree_->createNewRoot(newNode);
         } else {

@@ -236,11 +236,6 @@ namespace cbt {
 
         pthread_cond_t compCond_;
         pthread_mutex_t compMutex_;
-
-#ifdef ENABLE_PAGING
-        pthread_cond_t pageCond_;
-        pthread_mutex_t pageMutex_;
-#endif  // ENABLE_PAGING
     };
 }
 

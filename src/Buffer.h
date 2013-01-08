@@ -37,20 +37,13 @@ namespace cbt {
         friend class Compressor;
 
         public:
-#ifdef ENABLE_PAGING
-          enum PageAction {
-              NO_PAGE,
-              PAGE_OUT,
-              PAGE_IN
-          };
-#endif  // ENABLE_PAGING
-
           class List {
             public:
               enum ListState {
-                  DECOMPRESSED,
-                  COMPRESSED,
-                  PAGED_OUT
+                  DECOMPRESSED = 0,
+                  COMPRESSED = 1,
+                  PAGED_OUT = 2,
+                  NUMBER_OF_LIST_STATES = 3,
               };
               List();
               ~List();
@@ -95,10 +88,12 @@ namespace cbt {
           bool empty() const;
           uint32_t numElements() const;
           void setParent(Node* n);
-#ifdef ENABLE_PAGING
+
+          // paging-related
           void setupPaging();
           void cleanupPaging();
-#endif  // ENABLE_PAGING
+          // decide whether a buffer must be paged or compressed
+          bool page();
 
           /* Sorting-related */
           void quicksort(uint32_t left, uint32_t right);
@@ -117,18 +112,6 @@ namespace cbt {
           bool decompress();
           void setCompressible(bool flag);
 
-#ifdef ENABLE_PAGING
-          /* Paging-related */
-          bool pageOut();
-          bool pageIn();
-          void setPageable(bool flag);
-          /* return value indicates whether the node needs to be added or
-           * if it's already present in the queue */
-          bool checkPageOut();
-          bool checkPageIn();
-          bool performPageAction();
-          PageAction getPageAction();
-#endif  // ENABLE_PAGING
           bool checkSortIntegrity(List* l);
 
         private:
@@ -141,11 +124,8 @@ namespace cbt {
           // used during merge
           List* aux_list_;
 
-#ifdef ENABLE_PAGING
-          /* Paging-related */
-          bool pageable_;
+          // Paging-related
           FILE* f_;
-#endif  // ENABLE_PAGING
     };
 }
 #endif  // SRC_BUFFER_H_

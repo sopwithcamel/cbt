@@ -54,9 +54,6 @@ namespace cbt {
     class Compressor;
     class Merger;
     class Sorter;
-#ifdef ENABLE_PAGING
-    class Pager;
-#endif  // ENABLE_PAGING
 #ifdef ENABLE_COUNTERS
     class Monitor;
 #endif  // ENABLE_COUNTERS
@@ -111,6 +108,8 @@ namespace cbt {
         CompressAlgorithm alg_;
         Node* rootNode_;
         Node* inputNode_;
+        // used as unique prefix for filenames
+        uint32_t tree_prefix_;
 
         std::deque<Node*> emptyRootNodes_;
         pthread_mutex_t emptyRootNodesMutex_;
@@ -135,9 +134,6 @@ namespace cbt {
         Merger* merger_;
         Compressor* compressor_;
 
-#ifdef ENABLE_PAGING
-        Pager* pager_;
-#endif
 #ifdef ENABLE_COUNTERS
         Monitor* monitor_;
 #endif
