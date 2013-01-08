@@ -780,8 +780,8 @@ namespace cbt {
     }
 
     bool Buffer::page() {
-        if (node_->level() == 0)
-            return true;
+//        if (node_->level() == 0)
+//            return true;
         return false;
     }
 
