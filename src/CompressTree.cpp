@@ -435,10 +435,10 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
-        uint32_t mergerThreadCount = 4;
-        uint32_t compressorThreadCount = 4;
-        uint32_t emptierThreadCount = 4;
-        uint32_t sorterThreadCount = 4;
+        uint32_t mergerThreadCount = 1;
+        uint32_t compressorThreadCount = 1;
+        uint32_t emptierThreadCount = 1;
+        uint32_t sorterThreadCount = 1;
 
         // One for the inserter
         uint32_t threadCount = mergerThreadCount + compressorThreadCount +
