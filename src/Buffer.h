@@ -94,6 +94,7 @@ namespace cbt {
            * buffers may be compressed */
           bool empty() const;
           uint32_t numElements() const;
+          uint32_t size() const;
           void setParent(Node* n);
 #ifdef ENABLE_PAGING
           void setupPaging();

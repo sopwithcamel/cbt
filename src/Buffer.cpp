@@ -135,6 +135,13 @@ namespace cbt {
         return num;
     }
 
+    uint32_t Buffer::size() const {
+        uint32_t siz = 0;
+        for (uint32_t i = 0; i < lists_.size(); ++i)
+            siz += lists_[i]->size_;
+        return siz;
+    }
+
     void Buffer::setParent(Node* n) {
         node_ = n;
     }
