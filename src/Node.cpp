@@ -114,8 +114,8 @@ namespace cbt {
             return true;
         }
 
-        uint32_t n = buffer_.numElements();        
-        if (n < EMPTY_THRESHOLD * 0.75) {
+        uint32_t siz = buffer_.size();        
+        if (siz < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
             if (!schedule_mask_.is_set(DECOMPRESS) &&
@@ -143,7 +143,7 @@ namespace cbt {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
-                        %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
+                        %u/%u\n", id_, buffer_.size_(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
                 schedule(COMPRESS);
@@ -467,7 +467,7 @@ namespace cbt {
     }
 
     bool Node::isFull() const {
-        if (buffer_.numElements() > EMPTY_THRESHOLD)
+        if (buffer_.size() > EMPTY_THRESHOLD)
             return true;
         return false;
     }
