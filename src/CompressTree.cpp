@@ -131,10 +131,24 @@ namespace cbt {
             // page in and decompress first leaf
             Node* curLeaf = allLeaves_[0];
             assert(curLeaf->buffer_.lists_.size() == 1);
-            while (curLeaf->buffer_.numElements() == 0)
+            uint32_t numLeaves = allLeaves_.size();
+
+            while (curLeaf->buffer_.numElements() == 0 &&
+                    lastLeafRead_ < numLeaves)
                 curLeaf = allLeaves_[++lastLeafRead_];
             curLeaf->schedule(DECOMPRESS);
             curLeaf->wait(DECOMPRESS);
+
+            // also schedule the next leaf for decompression
+            uint32_t nextLeafIndex = lastLeafRead_ + 1;
+            if (nextLeafIndex < numLeaves) {
+                Node* nextLeaf = allLeaves_[nextLeafIndex];
+                while (nextLeaf->buffer_.numElements() == 0 &&
+                        nextLeafIndex < numLeaves)
+                    nextLeaf = allLeaves_[++nextLeafIndex];
+                if (nextLeafIndex < numLeaves)
+                    nextLeaf->schedule(DECOMPRESS);
+            }
         }
 
         Node* curLeaf = allLeaves_[lastLeafRead_];
@@ -169,10 +183,19 @@ namespace cbt {
                 return false;
             }
             Node *n = allLeaves_[lastLeafRead_];
-            while (curLeaf->buffer_.numElements() == 0)
-                curLeaf = allLeaves_[++lastLeafRead_];
-            n->schedule(DECOMPRESS);
+            // has already been scheduled for decompression, so wait...
             n->wait(DECOMPRESS);
+            // also schedule the next leaf for decompression
+            uint32_t nextLeafIndex = lastLeafRead_ + 1;
+            uint32_t numLeaves = allLeaves_.size();
+            if (nextLeafIndex < numLeaves) {
+                Node* nextLeaf = allLeaves_[nextLeafIndex];
+                while (nextLeaf->buffer_.numElements() == 0 &&
+                        nextLeafIndex < numLeaves)
+                    nextLeaf = allLeaves_[++nextLeafIndex];
+                if (nextLeafIndex < numLeaves)
+                    nextLeaf->schedule(DECOMPRESS);
+            }
             lastOffset_ = 0;
             lastElement_ = 0;
         }
