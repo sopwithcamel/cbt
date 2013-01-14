@@ -20,4 +20,4 @@ cbt
 ## For CBT ##
 	sudo apt-get install scons cppcheck libgtest-dev libprotobuf-dev libsnappy-dev libjemalloc-dev libgoogle-perftools-dev
 ## For server ##
-    sudo apt-get install libzmq-dev
+    sudo apt-get install libzmq-dev libboost-dev

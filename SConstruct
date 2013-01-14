@@ -40,11 +40,13 @@ testapp = env.Program('test/testcbt', test_files,
 
 client_files = ['service/Client.cpp', env.Object('util/HashUtil.cpp')]
 client_app = env.Program('service/cbtclient', client_files,
-            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-ldl', '-lgflags'])
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-ldl', '-lgflags'],
+            LINKFLAGS = ['-L.'])
 
 server_files = ['service/Server.cpp']
 server_app = env.Program('service/cbtserver', server_files,
-            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ljemalloc', '-ldl'])
+            LIBS = ['-lprotobuf', '-lcbt', '-lsnappy', '-lzmq', '-lpthread', '-lgflags', '-ljemalloc', '-ldl'],
+            LINKFLAGS = ['-L.'])
 
 ## Targets
 # build targets
