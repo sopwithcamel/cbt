@@ -20,4 +20,11 @@ cbt
 ## For CBT ##
 	sudo apt-get install scons cppcheck libgtest-dev libprotobuf-dev libsnappy-dev libjemalloc-dev libgoogle-perftools-dev
 ## For server ##
-    sudo apt-get install libzmq-dev libboost-dev
+    sudo apt-get install libzmq-dev
+## For liting ##
+1. git clone git://cayenne.cc.gt.atl.ga.us/cbt.git
+2. cd cbt
+3. git checkout liting
+4. remove #include <gperftools/heap-profiler.h> in Server.cpp
+5. copy wc_proto.so into the service directory
+6. run: scons -c service; scons service
