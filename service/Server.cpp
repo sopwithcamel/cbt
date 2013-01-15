@@ -139,6 +139,13 @@ namespace cbtservice {
             } else {
                 printf("ERROR\n");
             }
+
+            // if we have received an empty request, then reply with an empty
+            // message
+            if (num_received_PAOs == 0) {
+                s_send(socket, "");
+                continue;
+            }
                 
             //  Send reply back to client
             //  1. set up a coded stream to wrap a stringstream
