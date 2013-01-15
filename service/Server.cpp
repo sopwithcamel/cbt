@@ -29,7 +29,6 @@
 
 #include <algorithm>
 #include <gflags/gflags.h>
-#include <gperftools/heap-profiler.h>
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <zmq.hpp>
@@ -278,16 +277,7 @@ int main (int argc, char** argv) {
 
 //    signal(SIGINT, INThandler);
 
-/*
-    if (FLAGS_heapcheck)
-        HeapProfilerStart("/tmp/cbtserver");
-*/
-
     cbtservice::CBTServer::Instance()->Start();   
 
-/*
-    if (FLAGS_heapcheck)
-        HeapProfilerStop();
-*/
     return 0;
 }
