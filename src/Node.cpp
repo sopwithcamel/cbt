@@ -148,13 +148,13 @@ namespace cbt {
         if (isLeaf()) {
             /* this may be called even when buffer is not full (when flushing
              * all buffers at the end). */
-            if (isFull() || isRoot()) {
+            if (isFull() || (isRoot() && children_.size() > 0)) {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
                         %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
 #endif
-            } else {  // compress
+            } else if (!isRoot()) {  // compress
                 schedule(COMPRESS);
             }
             return true;
