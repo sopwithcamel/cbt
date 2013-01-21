@@ -154,7 +154,7 @@ namespace cbt {
         Node* curLeaf = allLeaves_[lastLeafRead_];
         Buffer::List* l = curLeaf->buffer_.lists_[0];
         hash = reinterpret_cast<void*>(&l->hashes_[lastElement_]);
-//        ops->createPAO(NULL, &agg);
+        ops->createPAO(NULL, &agg);
 //        if (lastLeafRead_ == 0)
 //            fprintf(stderr, "%ld\n", lastOffset_);
         if (!(ops->deserialize(agg, l->data_ + lastOffset_,
