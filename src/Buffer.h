@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <vector>
 #include "Config.h"
+#include "PartialAgg.h"
 
 namespace cbt {
     class Node;
@@ -141,6 +142,8 @@ namespace cbt {
           char** perm_;
           // used during merge
           List* aux_list_;
+          std::vector<PartialAgg*> lastPAOs_;
+          uint32_t max_last_paos_;
 
 #ifdef ENABLE_PAGING
           /* Paging-related */

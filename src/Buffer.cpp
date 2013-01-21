@@ -86,7 +86,7 @@ namespace cbt {
     }
 
     Buffer::Buffer() :
-            compressible_(true) {
+            compressible_(true), max_last_paos_(0) {
 #ifdef ENABLE_PAGING
         pageable_ = true;
 #endif  // ENABLE_PAGING
@@ -94,6 +94,12 @@ namespace cbt {
 
     Buffer::~Buffer() {
         deallocate();
+        if (max_last_paos_ > 0) {
+            const Operations* o = node_->tree_->ops;
+            for (uint32_t i = 0; i < max_last_paos_; ++i)
+                o->destroyPAO(lastPAOs_[i]);
+            lastPAOs_.clear();
+        }
     }
 
     Buffer::List* Buffer::addList(bool isLarge/* = false */) {
@@ -491,31 +497,58 @@ namespace cbt {
         const Operations* o = node_->tree_->ops;
 
         // Check that PAOs are actually created
-        PartialAgg *lastPAO, *thisPAO;
-        assert(1 == o->createPAO(NULL, &lastPAO));
+        PartialAgg *thisPAO;
         assert(1 == o->createPAO(NULL, &thisPAO));
+        if (max_last_paos_ == 0) {
+            PartialAgg* p;
+            assert(1 == o->createPAO(NULL, &p));
+            lastPAOs_.push_back(p);
+            ++max_last_paos_;
+        }
+        uint32_t num_last_PAOs = 0;
 
         for (uint32_t i = 1; i < l->num_; ++i) {
             if (l->hashes_[i] == l->hashes_[lastIndex]) {
                 // aggregate elements
                 if (i == lastIndex + 1) {
-                    if (!(o->deserialize(lastPAO,
+                    if (!(o->deserialize(lastPAOs_[0],
                                     perm_[lastIndex],
                                     l->sizes_[lastIndex]))) {
                         fprintf(stderr, "Error at index %d\n", i);
                         assert(false);
                     }
+                    num_last_PAOs = 1;
                 }
                 assert(o->deserialize(thisPAO, perm_[i],
                             l->sizes_[i]));
-                if (o->sameKey(thisPAO, lastPAO)) {
-                    o->merge(lastPAO, thisPAO);
-                    continue;
+                // we have now found that the hash of the current PAO is the
+                // same as the hash of the lastPAOs. Next we need to check if
+                // the keys match ...
+                bool keys_match = false;
+                for (uint32_t j = 0; j < num_last_PAOs; ++j) {
+                    if (o->sameKey(thisPAO, lastPAOs_[j])) {
+                        o->merge(lastPAOs_[j], thisPAO);
+                        keys_match = true;
+                        break;
+                    }
                 }
+                if (!keys_match) {
+                    PartialAgg* t = thisPAO;
+                    if (num_last_PAOs == max_last_paos_) {
+                        PartialAgg* p;
+                        assert(1 == o->createPAO(NULL, &p));
+                        lastPAOs_.push_back(p);
+                        ++max_last_paos_;
+                    }
+                    thisPAO = lastPAOs_[num_last_PAOs];
+                    lastPAOs_[num_last_PAOs] = t;
+                    num_last_PAOs;
+                }
+                continue;
             }
-            // copy hash and size into auxBuffer_
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
+
             if (i == lastIndex + 1) {
+                a->hashes_[a->num_] = l->hashes_[lastIndex];
                 // the size wouldn't have changed
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
                 //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
@@ -523,17 +556,19 @@ namespace cbt {
                         reinterpret_cast<void*>(perm_[lastIndex]),
                         l->sizes_[lastIndex]);
                 a->size_ += l->sizes_[lastIndex];
+                a->num_++;
             } else {
-                uint32_t buf_size = o->getSerializedSize(lastPAO);
-                o->serialize(lastPAO, a->data_ + a->size_, buf_size);
+                for (uint32_t j = 0; j < num_last_PAOs; ++j) {
+                    uint32_t buf_size = o->getSerializedSize(lastPAOs_[j]);
+                    o->serialize(lastPAOs_[j], a->data_ + a->size_, buf_size);
 
-                a->sizes_[a->num_] = buf_size;
-                a->size_ += buf_size;
-#ifdef ENABLE_COUNTERS
-                tree_->monitor_->bctr++;
-#endif
+                    a->hashes_[a->num_] = l->hashes_[lastIndex];
+                    a->sizes_[a->num_] = buf_size;
+                    a->size_ += buf_size;
+                    a->num_++;
+                }
+                num_last_PAOs = 0;
             }
-            a->num_++;
             lastIndex = i;
         }
         // copy the last PAO; TODO: Clean this up!
@@ -547,15 +582,19 @@ namespace cbt {
                     reinterpret_cast<void*>(perm_[lastIndex]),
                     l->sizes_[lastIndex]);
             a->size_ += l->sizes_[lastIndex];
+            a->num_++;
         } else {
-            uint32_t buf_size = o->getSerializedSize(lastPAO);
-            o->serialize(lastPAO, a->data_ + a->size_, buf_size);
+            for (uint32_t j = 0; j < num_last_PAOs; ++j) {
+                uint32_t buf_size = o->getSerializedSize(lastPAOs_[j]);
+                o->serialize(lastPAOs_[j], a->data_ + a->size_, buf_size);
 
-            a->hashes_[a->num_] = l->hashes_[lastIndex];
-            a->sizes_[a->num_] = buf_size;
-            a->size_ += buf_size;
+                a->hashes_[a->num_] = l->hashes_[lastIndex];
+                a->sizes_[a->num_] = buf_size;
+                a->size_ += buf_size;
+                a->num_++;
+            }
+            num_last_PAOs = 0;
         }
-        a->num_++;
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d aggregated from %u to %u\n", node_->id_,
                 numElements(), aux.numElements());
@@ -566,8 +605,6 @@ namespace cbt {
         if (!isSort && lists_.size() > 1)
             aux_list_->deallocate();
 
-        // destroy temporary PAOs
-        o->destroyPAO(lastPAO);
         o->destroyPAO(thisPAO);
 
         // clear buffer and shallow copy aux into buffer
@@ -582,6 +619,7 @@ namespace cbt {
     // Compression-related    
 
     bool Buffer::compress() {
+#ifdef ENABLE_COMPRESSION
         if (!empty()) {
             // allocate memory for one list
             Buffer compressed;
@@ -607,6 +645,12 @@ namespace cbt {
                         l->num_ * sizeof(uint32_t),
                         reinterpret_cast<char*>(cl->sizes_),
                         &l->c_sizelen_);
+/*
+                compsort::compress(l->hashes_, l->num_,
+                        cl->hashes_, (uint32_t&)l->c_hashlen_);
+                rle::encode(l->sizes_, l->num_, cl->sizes_,
+                        (uint32_t&)l->c_sizelen_);
+*/
                 snappy::RawCompress(l->data_, l->size_,
                         cl->data_,
                         &l->c_datalen_);
@@ -628,6 +672,7 @@ namespace cbt {
                         &l->c_datalen_);
 */
 #endif
+//                fprintf(stderr, "%lu: %lu\n", l->size_, l->c_datalen_);
                 l->deallocate();
                 l->hashes_ = cl->hashes_;
                 l->sizes_ = cl->sizes_;
@@ -641,10 +686,12 @@ namespace cbt {
             // clear compressed list so lists won't be deallocated on return
             compressed.clear();
         }
+#endif  // ENABLE_COMPRESSION
         return true;
     }
 
     bool Buffer::decompress() {
+#ifdef ENABLE_COMPRESSION
         if (!empty()) {
             // allocate memory for decompressed buffers
             Buffer decompressed;
@@ -658,6 +705,13 @@ namespace cbt {
                 Buffer::List* l =
                         decompressed.lists_[decompressed.lists_.size()-1];
 #ifdef SNAPPY_COMPRESSION
+/*
+                uint32_t siz;
+                compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
+                        l->hashes_, siz);
+                rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
+                        l->sizes_, siz);
+*/
                 snappy::RawUncompress((const char*)cl->hashes_,
                         cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
                 snappy::RawUncompress((const char*)cl->sizes_,
@@ -695,6 +749,7 @@ namespace cbt {
                     node_->id_, numElements());
 #endif  // CT_NODE_DEBUG
         }
+#endif  // ENABLE_COMPRESSION
         return true;
     }
 
