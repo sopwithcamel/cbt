@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <vector>
 #include "Config.h"
+#include "PartialAgg.h"
 
 namespace cbt {
     class Node;
@@ -94,6 +95,7 @@ namespace cbt {
            * buffers may be compressed */
           bool empty() const;
           uint32_t numElements() const;
+          uint32_t size() const;
           void setParent(Node* n);
 #ifdef ENABLE_PAGING
           void setupPaging();
@@ -144,6 +146,8 @@ namespace cbt {
           char** perm_;
           // used during merge
           List* aux_list_;
+          std::vector<PartialAgg*> lastPAOs_;
+          uint32_t max_last_paos_;
 
 #ifdef ENABLE_PAGING
           /* Paging-related */

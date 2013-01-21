@@ -681,3 +681,22 @@ uint32_t HashUtil::NullHash(const void* buf, size_t length, uint32_t shiftbytes)
             (data[(length-shiftbytes-2)] << 8) +
             (data[(length-shiftbytes-1)]));
 }
+
+uint32_t HashUtil::DigramHash(const void* buf, size_t length) {
+    char* data = (char*)buf;
+    char* sep = strchr(data, '-');
+    if (!sep)
+        return MurmurHash(buf, length, 42);
+    uint32_t l1 = sep - data;
+    uint32_t l2 = length - l1 - 1;
+    uint32_t h1 = MurmurHash(data, l1, 42);
+    uint32_t h2 = MurmurHash(sep + 1, l2, 42);
+    uint32_t ret;
+    if (l1 > l2) {
+        ret = h1 + (h2 & 0x3ff);
+    } else {
+        ret = (h1 & 0x3ff) + h2 + 1;
+    }
+    if (ret == 0xffffffff) --ret;
+    return ret;
+}
