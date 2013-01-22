@@ -16,7 +16,7 @@
 //#define SNAPPY_COMPRESSION
 #endif  // ENABLE_COMPRESSION
 
-#ifndef PIPELINED_IMPL
+#ifdef PIPELINED_IMPL
 /* This option structures each buffer as consisting of multiple fragments. A
  * new fragment is created from each spill of the parent. The advantage of this
  * method is that previously-created fragments stay compressed in memory until
