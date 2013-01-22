@@ -405,6 +405,7 @@ namespace cbt {
         if (empty())
             return true;
 
+#ifdef STRUCTURED_BUFFER
         // initialize pointers to serialized PAOs
         uint32_t num = numElements();
         perm_ = reinterpret_cast<char**>(malloc(sizeof(char*) * num));
@@ -482,6 +483,9 @@ namespace cbt {
             }
         }
         checkSortIntegrity(aux_list_);
+#else  // STRUCTURED_BUFFER
+        assert(false && "Merge shouldn't be called for unstructured buffer");
+#endif  // STRUCTURED_BUFFER
         return true;
     }
 

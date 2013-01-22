@@ -189,7 +189,11 @@ namespace cbt {
         // if we're not using structured buffers, then we need the children to
         // be decompressed to copy into them. We do this slightly in advance.
         for (uint32_t i = 0; i < children_.size(); ++i) {
+#ifdef PIPELINED_IMPL
             children_[i]->schedule(DECOMPRESS);
+#else  // PIPELINED_IMPL
+            children_[i]->buffer_.decompress();
+#endif  // PIPELINED_IMPL
         }
 #endif  // STRUCTURED_BUFFER
 
@@ -234,7 +238,11 @@ namespace cbt {
                     if (curElement > lastElement) {
                         // copy elements into child
 #ifndef STRUCTURED_BUFFER
+#ifdef PIPELINED_IMPL
+                    // we wait only if this is a pipelined implementation which
+                    // doesn use a structured buffer
                         children_copy[curChild]->wait(DECOMPRESS);
+#endif  // PIPELINED_IMPL
 #endif  // STRUCTURED_BUFFER
                         children_copy[curChild]->copyIntoBuffer(l, lastElement,
                                 curElement - lastElement);
@@ -269,7 +277,11 @@ namespace cbt {
             // copy remaining elements into child
             if (curElement >= lastElement) {
 #ifndef STRUCTURED_BUFFER
+#ifdef PIPELINED_IMPL
+                // we wait only if this is a pipelined implementation which
+                // doesn use a structured buffer
                 children_[curChild]->wait(DECOMPRESS);
+#endif  // PIPELINED_IMPL
 #endif  // STRUCTURED_BUFFER
                 // copy elements into child
                 children_copy[curChild]->copyIntoBuffer(l, lastElement,
@@ -356,6 +368,7 @@ namespace cbt {
         // delete the old list
         buffer_.delList(0);
         l = buffer_.lists_[0];
+        assert(buffer_.lists_.size() == 1);
 
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d splits to Node %d: new indices: %u and\
@@ -826,8 +839,13 @@ namespace cbt {
 
     bool Node::canEmptyIntoNode() {
         bool ret = true;
+#ifdef PIPELINED_IMPL
         uint32_t schedule_test_mask = 7;
         uint32_t state_test_mask = 7;
+#else  // PIPELINED_IMPL
+        uint32_t schedule_test_mask = 1;
+        uint32_t state_test_mask = 1;
+#endif  // PIPELINED_IMPL
         ret &= (schedule_mask_.or_mask(schedule_test_mask) ==
                 schedule_test_mask);        
         ret &= (state_mask_.or_mask(state_test_mask) ==
