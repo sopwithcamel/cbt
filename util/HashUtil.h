@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <openssl/evp.h>
 #include <string>
 #include "fnv.h"
@@ -76,6 +77,9 @@ class HashUtil {
     // Wrappers for MD5 and SHA1 hashing using EVP
     static std::string MD5Hash(const char* inbuf, size_t in_length);
     static std::string SHA1Hash(const char* inbuf, size_t in_length);
+
+    // Digram hash
+    static uint32_t DigramHash(const void* buf, size_t length);
 
   private:
     HashUtil();

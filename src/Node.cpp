@@ -74,6 +74,10 @@ namespace cbt {
         // copy into Buffer fields
         Buffer::List* l = buffer_.lists_[0];
         l->hashes_[l->num_] = HashUtil::MurmurHash(key, strlen(key), 42);
+//        l->hashes_[l->num_] = HashUtil::DigramHash(key, strlen(key));
+        if (l->hashes_[l->num_] == 0xffffffff)
+            l->hashes_[l->num_]--;
+
         l->sizes_[l->num_] = buf_size;
         // is this required?
 //        memset(l->data_ + l->size_, 0, buf_size);
@@ -107,8 +111,8 @@ namespace cbt {
             return true;
         }
 
-        uint32_t n = buffer_.numElements();        
-        if (n < EMPTY_THRESHOLD * 0.75) {
+        uint32_t siz = buffer_.size();        
+        if (siz < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
             if (!schedule_mask_.is_set(DECOMPRESS) &&
@@ -136,7 +140,7 @@ namespace cbt {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
-                        %u/%u\n", id_, buffer_.numElements(), EMPTY_THRESHOLD);
+                        %u/%u\n", id_, buffer_.size(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
                 schedule(COMPRESS);
@@ -144,20 +148,21 @@ namespace cbt {
             return true;
         }
 
+        std::vector<Node*> children_copy = children_;
         if (buffer_.empty()) {
-            for (curChild = 0; curChild < children_.size(); curChild++) {
-                children_[curChild]->emptyOrCompress();
+            for (curChild = 0; curChild < children_copy.size(); curChild++) {
+                children_copy[curChild]->emptyOrCompress();
             }
         } else {
             checkSerializationIntegrity();
             Buffer::List* l = buffer_.lists_[0];
             // find the first separator strictly greater than the first element
             while (l->hashes_[curElement] >=
-                    children_[curChild]->separator_) {
-                children_[curChild]->emptyOrCompress();
+                    children_copy[curChild]->separator_) {
+                children_copy[curChild]->emptyOrCompress();
                 curChild++;
 #ifdef ENABLE_ASSERT_CHECKS
-                if (curChild >= children_.size()) {
+                if (curChild >= children_copy.size()) {
                     fprintf(stderr,
                             "Node: %d: Can't place %u among children\n", id_,
                             l->hashes_[curElement]);
@@ -169,7 +174,7 @@ namespace cbt {
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node: %d: first node chosen: %d (sep: %u, \
                 child: %d); first element: %u\n", id_, children_[curChild]->id_,
-                    children_[curChild]->separator_, curChild, l->hashes_[0]);
+                    children_copy[curChild]->separator_, curChild, l->hashes_[0]);
 #endif
             uint32_t num = buffer_.numElements();
 #ifdef ENABLE_ASSERT_CHECKS
@@ -178,30 +183,30 @@ namespace cbt {
 #endif
             while (curElement < num) {
                 if (l->hashes_[curElement] >=
-                        children_[curChild]->separator_) {
+                        children_copy[curChild]->separator_) {
                     /* this separator is the largest separator that is not greater
                      * than *curHash. This invariant needs to be maintained.
                      */
                     if (curElement > lastElement) {
                         // copy elements into child
-                        children_[curChild]->copyIntoBuffer(l, lastElement,
+                        children_copy[curChild]->copyIntoBuffer(l, lastElement,
                                 curElement - lastElement);
 #ifdef CT_NODE_DEBUG
                         fprintf(stderr, "Copied %u elements into node %d\
                                  list:%lu\n",
                                 curElement - lastElement,
-                                children_[curChild]->id_,
-                                children_[curChild]->buffer_.lists_.size()-1);
+                                children_copy[curChild]->id_,
+                                children_copy[curChild]->buffer_.lists_.size()-1);
 #endif
                         lastElement = curElement;
                     }
                     // skip past all separators not greater than current hash
                     while (l->hashes_[curElement]
-                            >= children_[curChild]->separator_) {
-                        children_[curChild]->emptyOrCompress();
+                            >= children_copy[curChild]->separator_) {
+                        children_copy[curChild]->emptyOrCompress();
                         curChild++;
 #ifdef ENABLE_ASSERT_CHECKS
-                        if (curChild >= children_.size()) {
+                        if (curChild >= children_copy.size()) {
                             fprintf(stderr, "Can't place %u among children\n",
                                     l->hashes_[curElement]);
                             assert(false);
@@ -217,21 +222,21 @@ namespace cbt {
             // copy remaining elements into child
             if (curElement >= lastElement) {
                 // copy elements into child
-                children_[curChild]->copyIntoBuffer(l, lastElement,
+                children_copy[curChild]->copyIntoBuffer(l, lastElement,
                         curElement - lastElement);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Copied %u elements into node %d; \
                         list: %lu\n",
                         curElement - lastElement,
-                        children_[curChild]->id_,
-                        children_[curChild]->buffer_.lists_.size()-1);
+                        children_copy[curChild]->id_,
+                        children_copy[curChild]->buffer_.lists_.size()-1);
 #endif
-                children_[curChild]->emptyOrCompress();
+                children_copy[curChild]->emptyOrCompress();
                 curChild++;
             }
             // empty or compress any remaining children
-            while (curChild < children_.size()) {
-                children_[curChild]->emptyOrCompress();
+            while (curChild < children_copy.size()) {
+                children_copy[curChild]->emptyOrCompress();
                 curChild++;
             }
 
@@ -242,6 +247,8 @@ namespace cbt {
                 buffer_.deallocate();
             }
         }
+        children_copy.clear();
+
         // Split leaves can cause the number of children to increase. Check.
         if (children_.size() > tree_->b_) {
             splitNonLeaf();
@@ -454,7 +461,7 @@ namespace cbt {
     }
 
     bool Node::isFull() const {
-        if (buffer_.numElements() > EMPTY_THRESHOLD)
+        if (buffer_.size() > EMPTY_THRESHOLD)
             return true;
         return false;
     }
