@@ -81,6 +81,7 @@ namespace cbt {
         if (!threadsStarted_) {
             startThreads();
         }
+
         for (uint64_t i = 0; i < num; ++i) {
             PartialAgg* agg = paos[i];
             if (inputNode_->isFull()) {

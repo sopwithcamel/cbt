@@ -24,6 +24,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <sstream>
 #include "Buffer.h"
@@ -713,11 +715,8 @@ namespace cbt {
         if (!empty()) {
             // allocate memory for decompressed buffers
             Buffer decompressed;
-
-            bool paging_enabled = page();
             // set file pointer to beginning of file
-            if (paging_enabled)
-                rewind(f_);
+            rewind(f_);
 
             for (uint32_t i = 0; i < lists_.size(); ++i) {
                 Buffer::List* cl = lists_[i];
@@ -798,8 +797,7 @@ namespace cbt {
 #endif  // CT_NODE_DEBUG
 
             // set file pointer to beginning of file
-            if (paging_enabled)
-                rewind(f_);
+            rewind(f_);
         }
 #endif  // ENABLE_COMPRESSION
         return true;
@@ -827,8 +825,18 @@ namespace cbt {
     }
 
     bool Buffer::page() {
-        if (node_->level() == 0)
+        if (node_->level() > 0)
+            return false;
+        FILE *file = fopen("/proc/self/statm", "r");
+        unsigned long vm = 0, res = 0;
+        if (file) {
+            fscanf (file, "%d %d", &vm, &res);
+        }
+        fclose(file);
+        if (res << 2 > 33554432) {
+            fprintf(stderr, "%li\n", res << 2);
             return true;
+        }
         return false;
     }
 
