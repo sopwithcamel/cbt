@@ -118,7 +118,7 @@ namespace cbt {
             return true;
         }
 
-        uint32_t siz = buffer_.size();        
+        uint32_t siz = buffer_.size();
         if (siz < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
@@ -180,8 +180,10 @@ namespace cbt {
             }
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node: %d: first node chosen: %d (sep: %u, \
-                child: %d); first element: %u\n", id_, children_[curChild]->id_,
-                    children_copy[curChild]->separator_, curChild, l->hashes_[0]);
+                    child: %d); first element: %u\n", id_,
+                    children_[curChild]->id_,
+                    children_copy[curChild]->separator_,
+                    curChild, l->hashes_[0]);
 #endif
             uint32_t num = buffer_.numElements();
 #ifdef ENABLE_ASSERT_CHECKS
@@ -488,7 +490,7 @@ namespace cbt {
     }
 
     void Node::done(const NodeState& state) {
-        switch(state) {
+        switch (state) {
             case COMPRESS:
             case DECOMPRESS:
                 {
@@ -514,7 +516,7 @@ namespace cbt {
     }
 
     void Node::schedule(const NodeState& state) {
-        switch(state) {
+        switch (state) {
             case COMPRESS:
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
@@ -670,9 +672,9 @@ namespace cbt {
         uint32_t schedule_test_mask = 7;
         uint32_t state_test_mask = 7;
         ret &= (schedule_mask_.or_mask(schedule_test_mask) ==
-                schedule_test_mask);        
+                schedule_test_mask);
         ret &= (state_mask_.or_mask(state_test_mask) ==
-                state_test_mask);        
+                state_test_mask);
         return ret;
     }
 

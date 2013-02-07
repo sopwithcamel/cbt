@@ -317,7 +317,6 @@ namespace cbt {
 
         uint32_t size, size_temp;
         char *per, *per_temp;
-        
 
         for (x = uleft; x < uright; ++x) {
             ++last[(array[x] >> shift) & 0xFF];
@@ -336,7 +335,7 @@ namespace cbt {
                 value = array[pointer[x]];
                 size = sizes[pointer[x]];
                 per = perm_[pointer[x]];
-                
+
                 y = (value >> shift) & 0xFF;
                 while (x != y) {
                     temp = array[pointer[y]];
@@ -363,12 +362,11 @@ namespace cbt {
 
         if (shift > 0) {
             shift -= 8;
-            for (x=0; x<256; ++x) {
-                temp = x > 0 ? pointer[x] - pointer[x-1] : pointer[0] - uleft;
+            for (x = 0; x < 256; ++x) {
+                temp = x > 0 ? pointer[x] - pointer[x - 1] : pointer[0] - uleft;
                 if (temp > 64) {
                     radixsort(pointer[x] - temp, pointer[x], shift);
                 } else if (temp > 1) {
-                    // std::sort(array + (pointer[x] - temp), array + pointer[x]);
                     insertion_sort(pointer[x] - temp, pointer[x]);
                 }
             }
@@ -395,7 +393,6 @@ namespace cbt {
     }
 
     bool Buffer::merge() {
-
         if (empty())
             return true;
 
@@ -424,7 +421,7 @@ namespace cbt {
         uint32_t nlists = lists_.size();
         uint32_t* heads = new uint32_t[nlists];
         uint32_t* indices = new uint32_t[nlists];
-        uint32_t* offsets = new uint32_t[nlists]; 
+        uint32_t* offsets = new uint32_t[nlists];
 
 #ifdef CT_NODE_DEBUG
         for (uint32_t i = 0; i < nlists; ++i)
@@ -551,7 +548,6 @@ namespace cbt {
                 a->hashes_[a->num_] = l->hashes_[lastIndex];
                 // the size wouldn't have changed
                 a->sizes_[a->num_] = l->sizes_[lastIndex];
-                //                memset(a->data_ + a->size_, 0, l->sizes_[lastIndex]);
                 memcpy(a->data_ + a->size_,
                         reinterpret_cast<void*>(perm_[lastIndex]),
                         l->sizes_[lastIndex]);
@@ -616,7 +612,7 @@ namespace cbt {
         return true;
     }
 
-    // Compression-related    
+    // Compression-related
 
     bool Buffer::compress() {
 #ifdef ENABLE_COMPRESSION
@@ -725,7 +721,8 @@ namespace cbt {
                 assert(LZ4_uncompress((const char*)cl->sizes_,
                         reinterpret_cast<char*>(l->sizes_),
                         cl->num_ * sizeof(uint32_t)) == cl->c_sizelen_);
-                assert(LZ4_uncompress(cl->data_, l->data_, cl->size_) == cl->c_datalen_);
+                assert(LZ4_uncompress(cl->data_, l->data_, cl->size_) ==
+                        cl->c_datalen_);
 /*
                 uint32_t siz;
                 compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,

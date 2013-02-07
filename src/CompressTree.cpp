@@ -53,7 +53,7 @@ namespace cbt {
             lastElement_(0),
             threadsStarted_(false) {
         BUFFER_SIZE = buffer_size;
-        MAX_ELS_PER_BUFFER = BUFFER_SIZE / 16; //pao_size;
+        MAX_ELS_PER_BUFFER = BUFFER_SIZE / 16;  //pao_size;
         EMPTY_THRESHOLD = BUFFER_SIZE >> 1;
 
         pthread_cond_init(&emptyRootAvailable_, NULL);

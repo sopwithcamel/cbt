@@ -106,6 +106,7 @@ namespace cbt {
             pthread_spin_unlock(&lock_);
             return ret;
         }
+
       private:
         uint32_t mask_;
         pthread_spinlock_t lock_;
@@ -199,7 +200,7 @@ namespace cbt {
         void wait(const NodeState& state);
         // Signal that the state waited upon has been reached
         void done(const NodeState& state);
-        // 
+        // (comment here)
         void schedule(const NodeState& act);
 
         // Ugh. This is required because a single compressor queue handles both
