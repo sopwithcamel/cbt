@@ -220,31 +220,5 @@ namespace cbt {
       private:
         friend class Node;
     };
-
-#ifdef ENABLE_COUNTERS
-    class Monitor : public Slave {
-      public:
-        explicit Monitor(CompressTree* tree);
-        ~Monitor();
-        void work(Node* n);
-        void addNode(Node* n);
-
-      protected:
-        virtual std::string getSlaveName() const;
-
-      private:
-        friend class Node;
-        friend class Compressor;
-
-        uint64_t numElements;
-        uint64_t numMerged;
-        std::vector<uint64_t> elctr;
-        std::vector<int32_t> nodeCtr;
-        std::vector<int32_t> totNodeCtr;
-        uint64_t actr;
-        uint64_t bctr;
-        uint64_t cctr;
-    };
-#endif
 }
 #endif  // SRC_SLAVES_H_

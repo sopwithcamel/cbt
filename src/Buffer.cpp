@@ -36,8 +36,6 @@
 #include "lz4.h"
 
 namespace cbt {
-    uint64_t Buffer::List::allocated_lists = 0;
-
     Buffer::List::List() :
             hashes_(NULL),
             sizes_(NULL),

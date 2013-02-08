@@ -55,8 +55,6 @@ namespace cbt {
               /* set list to empty */
               void setEmpty();
 
-              static uint64_t allocated_lists;
-
               uint32_t* hashes_;
               uint32_t* sizes_;
               char* data_;
