@@ -133,10 +133,6 @@ namespace cbt {
         Sorter* sorter_;
         Merger* merger_;
         Compressor* compressor_;
-
-#ifdef ENABLE_COUNTERS
-        Monitor* monitor_;
-#endif
     };
 }
 

@@ -69,10 +69,8 @@ namespace cbt {
         if (nodes_.empty()) {
             ret = NULL;
         } else {
-            NodeInfo* ni = nodes_.top();
-            nodes_.pop();
-            ret = ni->node;
-            delete ni;
+            ret = nodes_.front();
+            nodes_.pop_front();
         }
         pthread_spin_unlock(&nodesLock_);
         return ret;
@@ -80,10 +78,7 @@ namespace cbt {
 
     bool Slave::addNodeToQueue(Node* n, uint32_t priority) {
         pthread_spin_lock(&nodesLock_);
-        NodeInfo* ni = new NodeInfo();
-        ni->node = n;
-        ni->prio = priority;
-        nodes_.push(ni);
+        nodes_.push_back(n);
         pthread_spin_unlock(&nodesLock_);
         return true;
     }
@@ -221,17 +216,17 @@ namespace cbt {
             return;
         }
         pthread_spin_lock(&nodesLock_);
-        PriorityQueue p = nodes_;
-        while (!p.empty()) {
-            NodeInfo* n = p.top();
-            p.pop();
-            if (n->node->isRoot())
-                fprintf(stderr, "%d*, ", n->node->id());
+        std::deque<Node*> dq = nodes_;
+        pthread_spin_unlock(&nodesLock_);
+        while (!dq.empty()) {
+            Node* n = dq.front();
+            dq.pop_front();
+            if (n->isRoot())
+                fprintf(stderr, "%d*, ", n->id());
             else
-                fprintf(stderr, "%d, ", n->node->id());
+                fprintf(stderr, "%d, ", n->id());
         }
         fprintf(stderr, "\n");
-        pthread_spin_unlock(&nodesLock_);
     }
 #endif  // CT_NODE_DEBUG
 
