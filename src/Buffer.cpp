@@ -520,7 +520,7 @@ namespace cbt {
                             l->sizes_[i]));
                 // we have now found that the hash of the current PAO is the
                 // same as the hash of the lastPAOs. Next we need to check if
-                // the keys match ...
+                // the keys match...
                 bool keys_match = false;
                 for (uint32_t j = 0; j < num_last_PAOs; ++j) {
                     if (o->sameKey(thisPAO, lastPAOs_[j])) {
@@ -529,6 +529,8 @@ namespace cbt {
                         break;
                     }
                 }
+                // if the keys don't match we add the PAO to the list of PAOS
+                // each of which have the same hash, but differing keys
                 if (!keys_match) {
                     PartialAgg* t = thisPAO;
                     if (num_last_PAOs == max_last_paos_) {
@@ -539,7 +541,7 @@ namespace cbt {
                     }
                     thisPAO = lastPAOs_[num_last_PAOs];
                     lastPAOs_[num_last_PAOs] = t;
-                    num_last_PAOs;
+                    ++num_last_PAOs;
                 }
                 continue;
             }
@@ -735,13 +737,15 @@ namespace cbt {
                     snappy::RawUncompress(cl->data_, cl->c_datalen_,
                             l->data_);
 #else
-                    assert(LZ4_uncompress((const char*)cl->hashes_,
-                                reinterpret_cast<char*>(l->hashes_),
-                                cl->num_ * sizeof(uint32_t)) == cl->c_hashlen_);
-                    assert(LZ4_uncompress((const char*)cl->sizes_,
-                                reinterpret_cast<char*>(l->sizes_),
-                                cl->num_ * sizeof(uint32_t)) == cl->c_sizelen_);
-                    assert(LZ4_uncompress(cl->data_, l->data_, cl->size_) == cl->c_datalen_);
+                    assert((size_t)LZ4_uncompress((const char*)cl->hashes_,
+                            reinterpret_cast<char*>(l->hashes_),
+                            cl->num_ * sizeof(uint32_t)) == cl->c_hashlen_);
+                    assert((size_t)LZ4_uncompress((const char*)cl->sizes_,
+                            reinterpret_cast<char*>(l->sizes_),
+                            cl->num_ * sizeof(uint32_t)) == cl->c_sizelen_);
+                    assert((size_t)LZ4_uncompress(cl->data_, l->data_,
+                            cl->size_) == cl->c_datalen_);
+
                     /*
                        uint32_t siz;
                        compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
@@ -828,7 +832,7 @@ namespace cbt {
         FILE *file = fopen("/proc/self/statm", "r");
         unsigned long vm = 0, res = 0;
         if (file) {
-            fscanf (file, "%d %d", &vm, &res);
+            fscanf (file, "%lu %lu", &vm, &res);
         }
         fclose(file);
         if (res << 2 > 10485760) {
