@@ -218,6 +218,7 @@ namespace cbt {
         pthread_spin_lock(&nodesLock_);
         std::deque<Node*> dq = nodes_;
         pthread_spin_unlock(&nodesLock_);
+        fprintf(stderr, "(%lu): ", dq.size());
         while (!dq.empty()) {
             Node* n = dq.front();
             dq.pop_front();
@@ -378,6 +379,7 @@ namespace cbt {
                 node->id_, node->buffer_.numElements(), ret? "True" : "False");
         printElements();
 #endif
+        (void)ret; // to prevent unused variable warning
     }
 
     std::string Emptier::getSlaveName() const {
