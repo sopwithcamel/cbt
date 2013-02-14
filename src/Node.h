@@ -199,13 +199,10 @@ namespace cbt {
         void wait(const NodeState& state);
         // Signal that the state waited upon has been reached
         void done(const NodeState& state);
-        // 
-        void schedule(const NodeState& act);
-
-        // Ugh. This is required because a single compressor queue handles both
-        // compression and decompression. The Slave, unfortunately, needs to
-        // know which of these is being performed, and we don't want to expose
-        // the locking etc. to the Slave.
+        // Schedules an action. This function is robust and checks if the
+        // action has already been scheduled or if the node is already in the
+        // scheduled state.
+        void schedule(const NodeState& state);
         bool canEmptyIntoNode();
 
       private:

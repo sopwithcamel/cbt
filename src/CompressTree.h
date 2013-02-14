@@ -45,7 +45,7 @@ namespace cbt {
     };
 
     enum EmptyType {
-        ALWAYS,
+        FLUSH,
         IF_FULL
     };
 

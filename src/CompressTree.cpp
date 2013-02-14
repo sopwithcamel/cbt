@@ -245,7 +245,7 @@ namespace cbt {
         std::deque<Node*> visitQueue;
         fprintf(stderr, "Starting to flush\n");
 
-        emptyType_ = ALWAYS;
+        emptyType_ = FLUSH;
         inputNode_->schedule(SORT);
 
         int all_done;

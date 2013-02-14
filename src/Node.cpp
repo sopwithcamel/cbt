@@ -105,20 +105,22 @@ namespace cbt {
 
     bool Node::emptyOrCompress() {
         bool ret = true;
-        if (tree_->emptyType_ == ALWAYS) {
+        // if in flush mode, then schedule the node for emptying regardless
+        if (tree_->emptyType_ == FLUSH) {
             schedule(DECOMPRESS);
             schedule(MERGE);
-            return true;
+            return ret;
         }
 
         uint32_t siz = buffer_.size();        
+        // if siz < 75% of threshold then we continue to compress if not, we
+        // prepare for spilling by scheduling a decompress. Once the node is
+        // actually full, a merge is also scheduled (this will automatically
+        // call empty)
         if (siz < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
-            if (!schedule_mask_.is_set(DECOMPRESS) &&
-                    !state_mask_.is_set(DECOMPRESS)) {
-                schedule(DECOMPRESS);
-            }
+            schedule(DECOMPRESS);
             if (isFull()) {
                 schedule(MERGE);
             }
@@ -131,11 +133,12 @@ namespace cbt {
         uint32_t curElement = 0;
         uint32_t lastElement = 0;
 
-        /* if i am a leaf node, queue up for action later after all the
-         * internal nodes have been processed */
+        // if it is a leaf node, queue up for action later after all the internal
+        // nodes have been processed
         if (isLeaf()) {
-            /* this may be called even when buffer is not full (when flushing
-             * all buffers at the end). */
+            // it can't be assumed that the leaf is full as this may be called
+            // even when when flushing all buffers at the end. In the latter
+            // case, we compress the leaf without splitting
             if (isFull() || isRoot()) {
                 tree_->addLeafToEmpty(this);
 #ifdef CT_NODE_DEBUG
@@ -518,12 +521,16 @@ namespace cbt {
                 {
                     if (!buffer_.compressible_ || buffer_.empty())
                         return;
+                    // cancel compression if it has been scheduled
                     schedule_mask_.unset(COMPRESS);
-                    if (!schedule_mask_.is_set(DECOMPRESS)) {
-                        schedule_mask_.set(DECOMPRESS);
-                        tree_->compressor_->addNode(this);
-                        tree_->compressor_->wakeup();
-                    }
+                    // check if the action has already been scheduled
+                    if (schedule_mask_.is_set(DECOMPRESS) ||
+                            state_mask_.is_set(DECOMPRESS))
+                        return;
+                    // if not, we add the node on to the queue
+                    schedule_mask_.set(DECOMPRESS);
+                    tree_->compressor_->addNode(this);
+                    tree_->compressor_->wakeup();
                 }
                 break;
             case SORT:
