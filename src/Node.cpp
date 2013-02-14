@@ -120,8 +120,8 @@ namespace cbt {
         if (siz < EMPTY_THRESHOLD * 0.75) {
             schedule(COMPRESS);
         } else {
-            schedule(DECOMPRESS);
             if (isFull()) {
+                schedule(DECOMPRESS);
                 schedule(MERGE);
             }
         }

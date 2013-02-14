@@ -80,13 +80,11 @@ namespace cbt {
         friend class Buffer;
         friend class Node;
         friend class Slave;
+        friend class Decompressor;
         friend class Emptier;
         friend class Merger;
-        friend class Pager;
         friend class Sorter;
-#ifdef ENABLE_COUNTERS
-        friend class Monitor;
-#endif
+
         Node* getEmptyRootNode();
         void addEmptyRootNode(Node* n);
         void submitNodeForEmptying(Node* n);
@@ -119,6 +117,7 @@ namespace cbt {
         bool allFlush_;
         bool empty_;
         sem_t sleepSemaphore_;
+        sem_t decompressedSemaphore_;
         EmptyType emptyType_;
         std::deque<Node*> leavesToBeEmptied_;
         std::vector<Node*> allLeaves_;

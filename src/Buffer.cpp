@@ -835,8 +835,7 @@ namespace cbt {
             fscanf (file, "%lu %lu", &vm, &res);
         }
         fclose(file);
-        if (res << 2 > 10485760) {
-            fprintf(stderr, "%li\n", res << 2);
+        if (res << 2 > 20971520) {
             return true;
         }
         return false;
