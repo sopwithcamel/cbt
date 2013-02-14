@@ -529,8 +529,8 @@ namespace cbt {
                         return;
                     // if not, we add the node on to the queue
                     schedule_mask_.set(DECOMPRESS);
-                    tree_->compressor_->addNode(this);
-                    tree_->compressor_->wakeup();
+                    tree_->decompressor_->addNode(this);
+                    tree_->decompressor_->wakeup();
                 }
                 break;
             case SORT:

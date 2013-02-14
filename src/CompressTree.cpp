@@ -418,16 +418,14 @@ namespace cbt {
 
         uint32_t mergerThreadCount = 4;
         uint32_t compressorThreadCount = 4;
+        uint32_t decompressorThreadCount = 4;
         uint32_t emptierThreadCount = 4;
         uint32_t sorterThreadCount = 4;
 
         // One for the inserter
         uint32_t threadCount = mergerThreadCount + compressorThreadCount +
-                emptierThreadCount + sorterThreadCount + 1;
-#ifdef ENABLE_COUNTERS
-        uint32_t monitorThreadCount = 1;
-        threadCount += monitorThreadCount;
-#endif
+                decompressorThreadCount + emptierThreadCount +
+                sorterThreadCount + 1;
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
         sem_init(&sleepSemaphore_, 0, threadCount - 1);
 
@@ -436,6 +434,9 @@ namespace cbt {
 
         merger_ = new Merger(this);
         merger_->startThreads(mergerThreadCount);
+
+        decompressor_ = new Decompressor(this);
+        decompressor_->startThreads(decompressorThreadCount);
 
         compressor_ = new Compressor(this);
         compressor_->startThreads(compressorThreadCount);
@@ -462,6 +463,7 @@ namespace cbt {
         sorter_->stopThreads();
         emptier_->stopThreads();
         compressor_->stopThreads();
+        decompressor_->stopThreads();
 #ifdef ENABLE_COUNTERS
         monitor_->stopThreads();
 #endif

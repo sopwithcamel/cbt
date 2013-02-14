@@ -51,6 +51,7 @@ namespace cbt {
 
     class Node;
     class Emptier;
+    class Decompressor;
     class Compressor;
     class Merger;
     class Sorter;
@@ -133,6 +134,7 @@ namespace cbt {
         Sorter* sorter_;
         Merger* merger_;
         Compressor* compressor_;
+        Decompressor* decompressor_;
     };
 }
 

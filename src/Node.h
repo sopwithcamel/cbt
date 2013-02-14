@@ -37,6 +37,7 @@ namespace cbt {
     class Buffer;
     class CompressTree;
     class Emptier;
+    class Decompressor;
     class Compressor;
     class Merger;
 
@@ -116,6 +117,7 @@ namespace cbt {
         friend class CompressTree;
         friend class Buffer;
         friend class Compressor;
+        friend class Decompressor;
         friend class Emptier;
         friend class Merger;
         friend class Sorter;

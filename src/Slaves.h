@@ -83,8 +83,8 @@ namespace cbt {
         // get next node from (default: head of) queue or NULL if empty
         virtual Node* getNextNode(bool fromHead = true);
 
-        // add node to (default: tail of) queue
-        virtual bool addNodeToQueue(Node* node, uint32_t priority);
+        // add node to tail of queue
+        virtual bool addNodeToQueue(Node* node);
 
         static void* callHelper(void* context);
         // the pthread execution function. It extracts Nodes added by
@@ -123,8 +123,6 @@ namespace cbt {
 
         pthread_spinlock_t nodesLock_;
         // nodesLock_ protection begin
-            // never use the empty() member of the deque directly.
-            // instead, always use Slave::empty()
         std::deque<Node*> nodes_;
         bool inputComplete_;
         bool nodesEmpty_;
@@ -190,10 +188,10 @@ namespace cbt {
         friend class Node;
     };
 
-    class Merger : public Slave {
+    class Decompressor : public Slave {
       public:
-        explicit Merger(CompressTree* tree);
-        ~Merger();
+        explicit Decompressor(CompressTree* tree);
+        ~Decompressor();
         void work(Node* n);
         void addNode(Node* node);
 
@@ -204,10 +202,10 @@ namespace cbt {
         friend class Node;
     };
 
-    class Pager : public Slave {
+    class Merger : public Slave {
       public:
-        explicit Pager(CompressTree* tree);
-        ~Pager();
+        explicit Merger(CompressTree* tree);
+        ~Merger();
         void work(Node* n);
         void addNode(Node* node);
 

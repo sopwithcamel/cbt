@@ -76,7 +76,7 @@ namespace cbt {
         return ret;
     }
 
-    bool Slave::addNodeToQueue(Node* n, uint32_t priority) {
+    bool Slave::addNodeToQueue(Node* n) {
         pthread_spin_lock(&nodesLock_);
         nodes_.push_back(n);
         pthread_spin_unlock(&nodesLock_);
@@ -276,7 +276,7 @@ namespace cbt {
     }
 
     void Sorter::addNode(Node* node) {
-        addNodeToQueue(node, node->level());
+        addNodeToQueue(node);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d (sz: %u) added to to-sort list: ",
                 node->id_, node->buffer_.numElements());
@@ -406,37 +406,52 @@ namespace cbt {
     }
 
     void Compressor::work(Node* n) {
-        NodeState state;
-        if (n->schedule_mask_.is_set(COMPRESS))
-            state = COMPRESS;
-        else
-            state = DECOMPRESS;
-        n->perform(state);
-        n->done(state);
+        if (n->schedule_mask_.is_set(COMPRESS)) {
+            n->perform(COMPRESS);
+            n->done(COMPRESS);
+        }
     }
 
     void Compressor::addNode(Node* node) {
-        NodeState state;
-        if (node->schedule_mask_.is_set(COMPRESS))
-            state = COMPRESS;
-        else
-            state = DECOMPRESS;
-        if (state == COMPRESS) {
-            addNodeToQueue(node, /*priority=*/0);
-        } else {
-            addNodeToQueue(node, /*priority=*/node->level());
-        }
+        addNodeToQueue(node);
 
 #ifdef CT_NODE_DEBUG
-        fprintf(stderr, "adding node %d (size: %u) to %s: ",
-                node->id_, node->buffer_.numElements(),
-                state == COMPRESS? "compress" : "decompress");
+        fprintf(stderr, "adding node %d (size: %u) to compress: ",
+                node->id_, node->buffer_.numElements());
         printElements();
 #endif  // CT_NODE_DEBUG
     }
 
     std::string Compressor::getSlaveName() const {
         return "Compressor";
+    }
+
+    // Decompressor
+
+    Decompressor::Decompressor(CompressTree* tree) :
+            Slave(tree) {
+    }
+
+    Decompressor::~Decompressor() {
+    }
+
+    void Decompressor::work(Node* n) {
+        // DECOMPRESS can never be cancelled
+        n->perform(DECOMPRESS);
+        n->done(DECOMPRESS);
+    }
+
+    void Decompressor::addNode(Node* node) {
+        addNodeToQueue(node);
+#ifdef CT_NODE_DEBUG
+        fprintf(stderr, "adding node %d (size: %u) to decompress: ",
+                node->id_, node->buffer_.numElements());
+        printElements();
+#endif  // CT_NODE_DEBUG
+    }
+
+    std::string Decompressor::getSlaveName() const {
+        return "Decompressor";
     }
 
     // Merger
@@ -462,7 +477,7 @@ namespace cbt {
     void Merger::addNode(Node* node) {
         if (node) {
             // Set node as queued for emptying
-            addNodeToQueue(node, node->level());
+            addNodeToQueue(node);
 
 #ifdef CT_NODE_DEBUG
             fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",
