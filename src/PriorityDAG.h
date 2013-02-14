@@ -57,8 +57,7 @@ namespace cbt {
 
     typedef std::tr1::unordered_map<Node*, std::set<uint32_t>*, NodeID,
             NodeEqual> DisabledDAG;
-    typedef std::priority_queue<NodeInfo*, std::vector<NodeInfo*>,
-            NodeInfoCompare> EnabledPriorityQueue;
+    typedef std::deque<NodeInfo*> EnabledPriorityQueue;
 
     class PriorityDAG {
       public:
@@ -69,8 +68,8 @@ namespace cbt {
                 delete it->second;
             }
             while (!enabNodes_.empty()) {
-                NodeInfo* n = enabNodes_.top();
-                enabNodes_.pop();
+                NodeInfo* n = enabNodes_.front();
+                enabNodes_.pop_front();
                 delete n;
             }
         }
@@ -96,7 +95,7 @@ namespace cbt {
                 NodeInfo* ni = new NodeInfo();
                 ni->node = n;
                 ni->prio = n->level();
-                enabNodes_.push(ni);
+                enabNodes_.push_back(ni);
             } else { // disabled queue
                 disabNodes_[n] = d; 
             }
@@ -114,8 +113,8 @@ namespace cbt {
         Node* pop() {
             if (enabNodes_.empty())
                 return NULL;
-            NodeInfo* ret = enabNodes_.top();
-            enabNodes_.pop();
+            NodeInfo* ret = enabNodes_.front();
+            enabNodes_.pop_front();
             Node* ret_node = ret->node;
             delete ret;
             return ret_node;
@@ -138,7 +137,7 @@ namespace cbt {
                         NodeInfo* np = new NodeInfo();
                         np->node = n->parent_;
                         np->prio = n->parent_->level();
-                        enabNodes_.push(np);
+                        enabNodes_.push_back(np);
 
                         delete ch;
                         DisabledDAG::iterator t = disabNodes_.find(n->parent_);
