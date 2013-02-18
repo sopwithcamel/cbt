@@ -158,13 +158,6 @@ namespace cbt {
          *    handleFullLeaves() call.
          */
         bool emptyBuffer();
-        /* Sort the root buffer based on hash value. All other nodes can
-         * aggregating by merging. */
-        bool sortBuffer();
-        /* Merge the buffer based on hash value */
-        bool mergeBuffer();
-        /* Aggregate the sorted/merged buffer */
-        bool aggregateBuffer(const NodeState& act);
         /* copy contents from node's buffer into this buffer. Starting from
          * index = index, copy num elements' data.
          */
@@ -172,7 +165,10 @@ namespace cbt {
 
         /* Tree-related functions */
 
-        /* split leaf node and return new leaf */
+        // handle full leaves
+        void handleFullLeaf();
+
+        // split leaf node and return new leaf
         Node* splitLeaf();
         /* Add a new child to the node; the child type indicates which side
          * of the separator the child must be inserted.
@@ -212,7 +208,7 @@ namespace cbt {
         CompressTree* tree_;
         /* Buffer */
         Buffer buffer_;
-        pthread_mutex_t stateMutex_;
+        pthread_mutex_t bufferMutex_;
         uint32_t id_;
         /* level in the tree; 0 at leaves and increases upwards */
         uint32_t level_;
@@ -220,6 +216,7 @@ namespace cbt {
 
         /* Pointers to children */
         std::vector<Node*> children_;
+        pthread_mutex_t childrenMutex_;
         uint32_t separator_;
 
         // Bit-masks that indicate the current state of the node and requested

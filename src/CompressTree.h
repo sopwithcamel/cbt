@@ -94,7 +94,6 @@ namespace cbt {
         void emptyTree();
         /* Write out all buffers to leaves. Do this before reading */
         bool flushBuffers();
-        void handleFullLeaves();
         void startThreads();
         void stopThreads();
 

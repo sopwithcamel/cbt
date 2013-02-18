@@ -45,6 +45,9 @@ namespace cbt {
         id_ = tree_->nodeCtr++;
         buffer_.setParent(this);
 
+        pthread_mutex_init(&bufferMutex_, NULL);
+        pthread_mutex_init(&childrenMutex_, NULL);
+
         pthread_mutex_init(&emptyMutex_, NULL);
         pthread_cond_init(&emptyCond_, NULL);
 
@@ -58,6 +61,9 @@ namespace cbt {
     }
 
     Node::~Node() {
+        pthread_mutex_destroy(&bufferMutex_);
+        pthread_mutex_destroy(&childrenMutex_);
+
         pthread_mutex_destroy(&sortMutex_);
         pthread_cond_destroy(&sortCond_);
 
@@ -140,7 +146,7 @@ namespace cbt {
             // even when when flushing all buffers at the end. In the latter
             // case, we compress the leaf without splitting
             if (isFull() || isRoot()) {
-                tree_->addLeafToEmpty(this);
+                handleFullLeaf();
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Leaf node %d added to full-leaf-list\
                         %u/%u\n", id_, buffer_.size(), EMPTY_THRESHOLD);
@@ -151,6 +157,9 @@ namespace cbt {
             return true;
         }
 
+        // work on a copy of the children vector because spilling may cause one
+        // or more children (if they are leaves) to split and modify the real
+        // children vector
         std::vector<Node*> children_copy = children_;
         if (buffer_.empty()) {
             for (curChild = 0; curChild < children_copy.size(); curChild++) {
@@ -259,22 +268,26 @@ namespace cbt {
         return true;
     }
 
-    bool Node::sortBuffer() {
-        bool ret = buffer_.sort();
-        checkIntegrity();
-        return ret;
-    }
+    void Node::handleFullLeaf() {
+        Node* newLeaf = splitLeaf();
 
-    bool Node::aggregateBuffer(const NodeState& act) {
-        bool ret = buffer_.aggregate(act == SORT? true : false);
-        checkIntegrity();
-        return ret;
-    }
-
-    bool Node::mergeBuffer() {
-        bool ret = buffer_.merge();
-        checkIntegrity();
-        return ret;
+        Node *l1 = NULL, *l2 = NULL;
+        if (isFull()) {
+            l1 = splitLeaf();
+        }
+        if (newLeaf && newLeaf->isFull()) {
+            l2 = newLeaf->splitLeaf();
+        }
+        schedule(COMPRESS);
+        if (newLeaf) {
+            newLeaf->schedule(COMPRESS);
+        }
+        if (l1) {
+            l1->schedule(COMPRESS);
+        }
+        if (l2) {
+            l2->schedule(COMPRESS);
+        }
     }
 
     /* A leaf is split by moving half the elements of the buffer into a
@@ -282,6 +295,9 @@ namespace cbt {
      * parent */
     Node* Node::splitLeaf() {
         checkIntegrity();
+#ifdef ENABLE_ASSERT_CHECKS
+        assert(buffer_.lists_.size() == 1);
+#endif  // ENABLE_ASSERT_CHECKS
 
         // select splitting index
         uint32_t num = buffer_.numElements();
@@ -377,6 +393,7 @@ namespace cbt {
         // insert separator value
 
         // find position of insertion
+        pthread_mutex_lock(&childrenMutex_);
         std::vector<Node*>::iterator it = children_.begin();
         for (i = 0; i < children_.size(); ++i) {
             if (newNode->separator_ > children_[i]->separator_)
@@ -385,6 +402,7 @@ namespace cbt {
         }
         it += i;
         children_.insert(it, newNode);
+        pthread_mutex_unlock(&childrenMutex_);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node: %d: Node %d added at pos %u, [", id_,
                 newNode->id_, i);
@@ -398,6 +416,8 @@ namespace cbt {
         return true;
     }
 
+    // TODO: Do we hold the children mutex here? When this function is called,
+    // no child is supposed to be emptying anyway
     bool Node::splitNonLeaf() {
         // ensure node's buffer is empty
 #ifdef ENABLE_ASSERT_CHECKS
@@ -605,20 +625,33 @@ namespace cbt {
         bool rootFlag = isRoot();
         switch (state) {
             case COMPRESS:
+                {
+                    // may have been cancelled
+                    if (state == COMPRESS) {
+                        pthread_mutex_lock(&bufferMutex_);
+                        buffer_.compress();
+                        pthread_mutex_unlock(&bufferMutex_);
+                    }
+                }
+                break;
             case DECOMPRESS:
                 {
-                    if (state == COMPRESS) {
-                        buffer_.compress();
-                    } else if (state == DECOMPRESS) {
-                        buffer_.decompress();
-                    }
+                    // a decompress may never be cancelled
+                    pthread_mutex_lock(&bufferMutex_);
+                    buffer_.decompress();
+                    pthread_mutex_unlock(&bufferMutex_);
                 }
                 break;
             case SORT:
                 {
+                    pthread_mutex_lock(&bufferMutex_);
                     assert(rootFlag && "Only the root buffer is sorted");
-                    sortBuffer();
-                    aggregateBuffer(SORT);
+                    buffer_.sort();
+                    checkIntegrity();
+
+                    buffer_.aggregate(state == SORT? true : false);
+                    checkIntegrity();
+                    pthread_mutex_unlock(&bufferMutex_);
                 }
                 break;
             case MERGE:
@@ -627,15 +660,20 @@ namespace cbt {
                     assert(!rootFlag && "Non-root buffer ever sorted");
                     assert(state_mask_.is_set(DECOMPRESS));
 #endif  // CT_NODE_DEBUG
-                    mergeBuffer();
-                    aggregateBuffer(MERGE);
+                    pthread_mutex_lock(&bufferMutex_);
+                    buffer_.merge();
+                    checkIntegrity();
+
+                    buffer_.aggregate(state == SORT? true : false);
+                    checkIntegrity();
+                    pthread_mutex_unlock(&bufferMutex_);
                 }
                 break;
             case EMPTY:
                 {
+                    pthread_mutex_lock(&bufferMutex_);
                     emptyBuffer();
-                    if (isLeaf())
-                        tree_->handleFullLeaves();
+                    pthread_mutex_unlock(&bufferMutex_);
                 }
                 break;
             default:

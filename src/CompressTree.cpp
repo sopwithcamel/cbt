@@ -296,40 +296,6 @@ namespace cbt {
         return true;
     }
 
-    /* A full leaf is handled by splitting the leaf into two leaves.*/
-    void CompressTree::handleFullLeaves() {
-        while (!leavesToBeEmptied_.empty()) {
-            Node* node = leavesToBeEmptied_.front();
-            leavesToBeEmptied_.pop_front();
-
-            Node* newLeaf = node->splitLeaf();
-
-            Node *l1 = NULL, *l2 = NULL;
-            if (node->isFull()) {
-                l1 = node->splitLeaf();
-            }
-            if (newLeaf && newLeaf->isFull()) {
-                l2 = newLeaf->splitLeaf();
-            }
-            node->schedule(COMPRESS);
-            if (newLeaf) {
-                newLeaf->schedule(COMPRESS);
-            }
-            if (l1) {
-                l1->schedule(COMPRESS);
-            }
-            if (l2) {
-                l2->schedule(COMPRESS);
-            }
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Leaf node %d removed from full-leaf-list\n",
-                    node->id_);
-#endif
-            // % WHY?
-            //node->setQueueStatus(NONE);
-        }
-    }
-
     Node* CompressTree::getEmptyRootNode() {
         pthread_mutex_lock(&emptyRootNodesMutex_);
         while (emptyRootNodes_.empty()) {
