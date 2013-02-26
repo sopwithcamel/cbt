@@ -116,7 +116,6 @@ namespace cbt {
         bool allFlush_;
         bool empty_;
         sem_t sleepSemaphore_;
-        sem_t decompressedSemaphore_;
         EmptyType emptyType_;
         std::deque<Node*> leavesToBeEmptied_;
         std::vector<Node*> allLeaves_;

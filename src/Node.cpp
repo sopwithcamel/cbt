@@ -119,11 +119,11 @@ namespace cbt {
         }
 
         uint32_t siz = buffer_.size();        
-        // if siz < 75% of threshold then we continue to compress if not, we
+        // if siz < 98% of threshold then we continue to compress if not, we
         // prepare for spilling by scheduling a decompress. Once the node is
         // actually full, a merge is also scheduled (this will automatically
         // call empty)
-        if (siz < EMPTY_THRESHOLD * 0.75) {
+        if (siz < EMPTY_THRESHOLD * 0.98) {
             schedule(COMPRESS);
         } else {
             if (isFull()) {

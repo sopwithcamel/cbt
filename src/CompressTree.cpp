@@ -394,7 +394,6 @@ namespace cbt {
                 sorterThreadCount + 1;
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
         sem_init(&sleepSemaphore_, 0, threadCount - 1);
-        sem_init(&decompressedSemaphore_, 0, 30);
 
         sorter_ = new Sorter(this);
         sorter_->startThreads(sorterThreadCount);

@@ -436,10 +436,6 @@ namespace cbt {
     }
 
     void Decompressor::work(Node* n) {
-        if (tree_->emptyType_ == IF_FULL)
-            sem_wait(&tree_->decompressedSemaphore_); 
-        int ret;
-        sem_getvalue(&tree_->decompressedSemaphore_, &ret);
         // DECOMPRESS can never be cancelled
         n->perform(DECOMPRESS);
         n->done(DECOMPRESS);
@@ -476,11 +472,6 @@ namespace cbt {
         n->schedule(EMPTY);
         // indicate that we're done sorting
         n->done(MERGE);
-
-        if (tree_->emptyType_ == IF_FULL)
-            sem_post(&tree_->decompressedSemaphore_); 
-        int ret;
-        sem_getvalue(&tree_->decompressedSemaphore_, &ret);
     }
 
     void Merger::addNode(Node* node) {

@@ -827,15 +827,13 @@ namespace cbt {
     }
 
     bool Buffer::page() {
-        if (node_->level() > 0)
-            return false;
         FILE *file = fopen("/proc/self/statm", "r");
         unsigned long vm = 0, res = 0;
         if (file) {
             fscanf (file, "%lu %lu", &vm, &res);
         }
         fclose(file);
-        if (res << 2 > 20971520) {
+        if (res << 2 > 31457280) {
             return true;
         }
         return false;
