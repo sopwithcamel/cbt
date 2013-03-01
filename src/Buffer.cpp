@@ -619,188 +619,190 @@ namespace cbt {
 
     bool Buffer::compress() {
 #ifdef ENABLE_COMPRESSION
-        if (!empty()) {
-            // allocate memory for one list
-            Buffer compressed;
+        if (empty())
+            return true;
 
-            for (uint32_t i = 0; i < lists_.size(); ++i) {
-                Buffer::List* l = lists_[i];
-                if (l->state_ == Buffer::List::COMPRESSED || 
-                        l->state_ == Buffer::List::PAGED_OUT)
-                    continue;
+        // allocate memory for one list
+        Buffer compressed;
 
-                if (!page()) {
-                    compressed.addList();
-                    // latest added list
-                    Buffer::List* cl =
-                        compressed.lists_[compressed.lists_.size()-1];
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
+            Buffer::List* l = lists_[i];
+            if (l->state_ == Buffer::List::COMPRESSED || 
+                    l->state_ == Buffer::List::PAGED_OUT)
+                continue;
+
+            if (!page()) {
+                compressed.addList();
+                // latest added list
+                Buffer::List* cl =
+                    compressed.lists_[compressed.lists_.size()-1];
 #ifdef SNAPPY_COMPRESSION
-                    snappy::RawCompress((const char*)l->hashes_,
-                            l->num_ * sizeof(uint32_t),
-                            reinterpret_cast<char*>(cl->hashes_),
-                            &l->c_hashlen_);
-                    snappy::RawCompress((const char*)l->sizes_,
-                            l->num_ * sizeof(uint32_t),
-                            reinterpret_cast<char*>(cl->sizes_),
-                            &l->c_sizelen_);
-                    snappy::RawCompress(l->data_, l->size_,
-                            cl->data_,
-                            &l->c_datalen_);
+                snappy::RawCompress((const char*)l->hashes_,
+                        l->num_ * sizeof(uint32_t),
+                        reinterpret_cast<char*>(cl->hashes_),
+                        &l->c_hashlen_);
+                snappy::RawCompress((const char*)l->sizes_,
+                        l->num_ * sizeof(uint32_t),
+                        reinterpret_cast<char*>(cl->sizes_),
+                        &l->c_sizelen_);
+                snappy::RawCompress(l->data_, l->size_,
+                        cl->data_,
+                        &l->c_datalen_);
 #else
-                    l->c_hashlen_ = LZ4_compress((const char*)l->hashes_,
-                            reinterpret_cast<char*>(cl->hashes_),
-                            l->num_ * sizeof(uint32_t));
-                    l->c_sizelen_ = LZ4_compress((const char*)l->sizes_,
-                            reinterpret_cast<char*>(cl->sizes_),
-                            l->num_ * sizeof(uint32_t));
-                    l->c_datalen_ = LZ4_compress(l->data_, cl->data_, l->size_);
-                    /*
-                       compsort::compress(l->hashes_, l->num_,
-                       cl->hashes_, (uint32_t&)l->c_hashlen_);
-                       rle::encode(l->sizes_, l->num_, cl->sizes_,
-                       (uint32_t&)l->c_sizelen_);
-                       snappy::RawCompress(l->data_, l->size_,
-                       cl->data_,
-                       &l->c_datalen_);
-                     */
+                l->c_hashlen_ = LZ4_compress((const char*)l->hashes_,
+                        reinterpret_cast<char*>(cl->hashes_),
+                        l->num_ * sizeof(uint32_t));
+                l->c_sizelen_ = LZ4_compress((const char*)l->sizes_,
+                        reinterpret_cast<char*>(cl->sizes_),
+                        l->num_ * sizeof(uint32_t));
+                l->c_datalen_ = LZ4_compress(l->data_, cl->data_, l->size_);
+                /*
+                   compsort::compress(l->hashes_, l->num_,
+                   cl->hashes_, (uint32_t&)l->c_hashlen_);
+                   rle::encode(l->sizes_, l->num_, cl->sizes_,
+                   (uint32_t&)l->c_sizelen_);
+                   snappy::RawCompress(l->data_, l->size_,
+                   cl->data_,
+                   &l->c_datalen_);
+                 */
 #endif
-                    l->deallocate();
-                    l->hashes_ = cl->hashes_;
-                    l->sizes_ = cl->sizes_;
-                    l->data_ = cl->data_;
-                    l->state_ = Buffer::List::COMPRESSED;
+                l->deallocate();
+                l->hashes_ = cl->hashes_;
+                l->sizes_ = cl->sizes_;
+                l->data_ = cl->data_;
+                l->state_ = Buffer::List::COMPRESSED;
 #ifdef CT_NODE_DEBUG
-                    fprintf(stderr, "compressed list %d in node %d\n",
-                            i, node_->id_);
+                fprintf(stderr, "compressed list %d in node %d\n",
+                        i, node_->id_);
 #endif  // CT_NODE_DEBUG
-                } else { // page
-                    size_t ret1, ret2, ret3;
-                    ret1 = fwrite(l->hashes_, 1,
-                            l->num_ * sizeof(uint32_t), f_);
-                    ret2 = fwrite(l->sizes_, 1,
-                            l->num_ * sizeof(uint32_t), f_);
-                    ret3 = fwrite(l->data_, 1,
-                            l->size_, f_);
-                    if (ret1 != l->num_ * sizeof(uint32_t) ||
-                            ret2 != l->num_ * sizeof(uint32_t) ||
-                            ret3 != l->size_) {
-                        assert(false);
+            } else { // page
+                size_t ret1, ret2, ret3;
+                ret1 = fwrite(l->hashes_, 1,
+                        l->num_ * sizeof(uint32_t), f_);
+                ret2 = fwrite(l->sizes_, 1,
+                        l->num_ * sizeof(uint32_t), f_);
+                ret3 = fwrite(l->data_, 1,
+                        l->size_, f_);
+                if (ret1 != l->num_ * sizeof(uint32_t) ||
+                        ret2 != l->num_ * sizeof(uint32_t) ||
+                        ret3 != l->size_) {
+                    assert(false);
 #ifdef ENABLE_ASSERT_CHECKS
-                        fprintf(stderr, "Node %d page-out fail! Error: %s\n",
-                                node_->id_, strerror(errno));
-                        fprintf(stderr,
-                                "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
-                                l->num_ * sizeof(uint32_t), ret1,
-                                l->num_ * sizeof(uint32_t), ret2,
-                                l->size_, ret3);
+                    fprintf(stderr, "Node %d page-out fail! Error: %s\n",
+                            node_->id_, strerror(errno));
+                    fprintf(stderr,
+                            "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
+                            l->num_ * sizeof(uint32_t), ret1,
+                            l->num_ * sizeof(uint32_t), ret2,
+                            l->size_, ret3);
 #endif  // ENABLE_ASSERT_CHECKS
-                    }
-                    fflush(f_);
-                    l->deallocate();
-                    l->state_ = List::PAGED_OUT;
-#ifdef CT_NODE_DEBUG
-                    fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
-#endif  // CT_NODE_DEBUG
                 }
+                fflush(f_);
+                l->deallocate();
+                l->state_ = List::PAGED_OUT;
+#ifdef CT_NODE_DEBUG
+                fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
+#endif  // CT_NODE_DEBUG
             }
-            // clear compressed list so lists won't be deallocated on return
-            compressed.clear();
         }
+        // clear compressed list so lists won't be deallocated on return
+        compressed.clear();
 #endif  // ENABLE_COMPRESSION
         return true;
     }
 
     bool Buffer::decompress() {
 #ifdef ENABLE_COMPRESSION
-        if (!empty()) {
-            // allocate memory for decompressed buffers
-            Buffer decompressed;
-            // set file pointer to beginning of file
-            rewind(f_);
+        if (empty())
+            return true;
 
-            for (uint32_t i = 0; i < lists_.size(); ++i) {
-                Buffer::List* cl = lists_[i];
-                if (cl->state_ == Buffer::List::DECOMPRESSED)
-                    continue;
+        // allocate memory for decompressed buffers
+        Buffer decompressed;
+        // set file pointer to beginning of file
+        rewind(f_);
 
-                decompressed.addList();
-                // latest added list
-                Buffer::List* l =
-                        decompressed.lists_[decompressed.lists_.size() - 1];
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
+            Buffer::List* cl = lists_[i];
+            if (cl->state_ == Buffer::List::DECOMPRESSED)
+                continue;
 
-                if (cl->state_ == Buffer::List::COMPRESSED) {
+            decompressed.addList();
+            // latest added list
+            Buffer::List* l =
+                decompressed.lists_[decompressed.lists_.size() - 1];
+
+            if (cl->state_ == Buffer::List::COMPRESSED) {
 #ifdef SNAPPY_COMPRESSION
-                    snappy::RawUncompress((const char*)cl->hashes_,
-                            cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
-                    snappy::RawUncompress((const char*)cl->sizes_,
-                            cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
-                    snappy::RawUncompress(cl->data_, cl->c_datalen_,
-                            l->data_);
+                snappy::RawUncompress((const char*)cl->hashes_,
+                        cl->c_hashlen_, reinterpret_cast<char*>(l->hashes_));
+                snappy::RawUncompress((const char*)cl->sizes_,
+                        cl->c_sizelen_, reinterpret_cast<char*>(l->sizes_));
+                snappy::RawUncompress(cl->data_, cl->c_datalen_,
+                        l->data_);
 #else
-                    assert((size_t)LZ4_uncompress((const char*)cl->hashes_,
+                assert((size_t)LZ4_uncompress((const char*)cl->hashes_,
                             reinterpret_cast<char*>(l->hashes_),
                             cl->num_ * sizeof(uint32_t)) == cl->c_hashlen_);
-                    assert((size_t)LZ4_uncompress((const char*)cl->sizes_,
+                assert((size_t)LZ4_uncompress((const char*)cl->sizes_,
                             reinterpret_cast<char*>(l->sizes_),
                             cl->num_ * sizeof(uint32_t)) == cl->c_sizelen_);
-                    assert((size_t)LZ4_uncompress(cl->data_, l->data_,
+                assert((size_t)LZ4_uncompress(cl->data_, l->data_,
                             cl->size_) == cl->c_datalen_);
 
-                    /*
-                       uint32_t siz;
-                       compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
-                       l->hashes_, siz);
-                       rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
-                       l->sizes_, siz);
-                       snappy::RawUncompress(cl->data_, cl->c_datalen_,
-                       l->data_);
-                     */
+                /*
+                   uint32_t siz;
+                   compsort::decompress(cl->hashes_, (uint32_t)cl->c_hashlen_,
+                   l->hashes_, siz);
+                   rle::decode(cl->sizes_, (uint32_t)cl->c_sizelen_,
+                   l->sizes_, siz);
+                   snappy::RawUncompress(cl->data_, cl->c_datalen_,
+                   l->data_);
+                 */
 #endif
-                    cl->deallocate();
-                    cl->hashes_ = l->hashes_;
-                    cl->sizes_ = l->sizes_;
-                    cl->data_ = l->data_;
-                    cl->state_ = List::DECOMPRESSED;
-                } else { // PAGED_OUT
-                    size_t ret1, ret2, ret3;
-                    ret1 = fread(l->hashes_, 1,
-                            cl->num_ * sizeof(uint32_t), f_);
-                    ret2 = fread(l->sizes_, 1,
-                            cl->num_ * sizeof(uint32_t), f_);
-                    ret3 = fread(l->data_, 1, cl->size_, f_);
-                    if (ret1 != cl->num_ * sizeof(uint32_t) ||
-                            ret2 != cl->num_ * sizeof(uint32_t) ||
-                            ret3 != cl->size_) {
+                cl->deallocate();
+                cl->hashes_ = l->hashes_;
+                cl->sizes_ = l->sizes_;
+                cl->data_ = l->data_;
+                cl->state_ = List::DECOMPRESSED;
+            } else { // PAGED_OUT
+                size_t ret1, ret2, ret3;
+                ret1 = fread(l->hashes_, 1,
+                        cl->num_ * sizeof(uint32_t), f_);
+                ret2 = fread(l->sizes_, 1,
+                        cl->num_ * sizeof(uint32_t), f_);
+                ret3 = fread(l->data_, 1, cl->size_, f_);
+                if (ret1 != cl->num_ * sizeof(uint32_t) ||
+                        ret2 != cl->num_ * sizeof(uint32_t) ||
+                        ret3 != cl->size_) {
 #ifdef ENABLE_ASSERT_CHECKS
-                        fprintf(stderr, "Node %d page-in fail! Error: %s\n",
-                                node_->id_, strerror(errno));
-                        fprintf(stderr,
-                                "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\n\
-                                DL:%ld;RDL:%ld\n",
-                                cl->num_ * sizeof(uint32_t), ret1,
-                                cl->num_ * sizeof(uint32_t), ret2,
-                                cl->size_, ret3);
+                    fprintf(stderr, "Node %d page-in fail! Error: %s\n",
+                            node_->id_, strerror(errno));
+                    fprintf(stderr,
+                            "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\n\
+                            DL:%ld;RDL:%ld\n",
+                            cl->num_ * sizeof(uint32_t), ret1,
+                            cl->num_ * sizeof(uint32_t), ret2,
+                            cl->size_, ret3);
 #endif  // ENABLE_ASSERT_CHECKS
-                        assert(false);
-                    }
-
-                    cl->deallocate();
-                    cl->hashes_ = l->hashes_;
-                    cl->sizes_ = l->sizes_;
-                    cl->data_ = l->data_;
-                    cl->state_ = List::DECOMPRESSED;
+                    assert(false);
                 }
+
+                cl->deallocate();
+                cl->hashes_ = l->hashes_;
+                cl->sizes_ = l->sizes_;
+                cl->data_ = l->data_;
+                cl->state_ = List::DECOMPRESSED;
             }
-            // clear decompressed so lists won't be deallocated on return
-            decompressed.clear();
+        }
+        // clear decompressed so lists won't be deallocated on return
+        decompressed.clear();
 #ifdef CT_NODE_DEBUG
-            fprintf(stderr, "decompressed node %d; n: %u\n",
-                    node_->id_, numElements());
+        fprintf(stderr, "decompressed node %d; n: %u\n",
+                node_->id_, numElements());
 #endif  // CT_NODE_DEBUG
 
-            // set file pointer to beginning of file
-            rewind(f_);
-        }
+        // set file pointer to beginning of file
+        rewind(f_);
 #endif  // ENABLE_COMPRESSION
         return true;
     }
