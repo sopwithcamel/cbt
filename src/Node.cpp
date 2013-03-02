@@ -325,13 +325,15 @@ namespace cbt {
         copyIntoBuffer(l, 0, splitIndex);
         separator_ = l->hashes_[splitIndex];
         // delete the old list
+        delete l;
         buffer_.delList(0);
-        l = buffer_.lists_[0];
 
         // check integrity of both leaves
         newLeaf->checkIntegrity();
         checkIntegrity();
 #ifdef CT_NODE_DEBUG
+        // the newly created list...
+        l = buffer_.lists_[0];
         fprintf(stderr, "Node %d splits to Node %d: new indices: %u and\
                 %u; new separators: %u and %u\n", id_, newLeaf->id_,
                 l->num_, newLeaf->buffer_.lists_[0]->num_, separator_,
@@ -350,8 +352,6 @@ namespace cbt {
 
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
             uint32_t num) {
-        // check if the node is still queued up for a previous compression
-        wait(COMPRESS);
 
         // calculate offset
         uint32_t offset = 0;
@@ -371,7 +371,8 @@ namespace cbt {
         }
 #endif
         // allocate a new List in the buffer and copy data into it
-        Buffer::List* l = buffer_.addList();
+        Buffer::List* l = new Buffer::List();
+
         // memset(l->hashes_, 0, num * sizeof(uint32_t));
         memcpy(l->hashes_, parent_list->hashes_ + index,
                 num * sizeof(uint32_t));
@@ -383,6 +384,9 @@ namespace cbt {
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;
+
+        buffer_.addList(l);
+
         checkSerializationIntegrity(buffer_.lists_.size()-1);
         buffer_.checkSortIntegrity(l);
         return true;
@@ -483,7 +487,7 @@ namespace cbt {
         }
     }
 
-    bool Node::isFull() const {
+    bool Node::isFull() {
         if (buffer_.size() > EMPTY_THRESHOLD)
             return true;
         return false;

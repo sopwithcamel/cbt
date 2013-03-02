@@ -136,7 +136,7 @@ namespace cbt {
         bool isLeaf() const;
         bool isRoot() const;
 
-        bool isFull() const;
+        bool isFull();
         uint32_t level() const;
         uint32_t id() const;
 

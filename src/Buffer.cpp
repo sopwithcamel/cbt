@@ -36,7 +36,7 @@
 #include "lz4.h"
 
 namespace cbt {
-    Buffer::List::List() :
+    Buffer::List::List(bool isLarge) :
             hashes_(NULL),
             sizes_(NULL),
             data_(NULL),
@@ -46,13 +46,6 @@ namespace cbt {
             c_hashlen_(0),
             c_sizelen_(0),
             c_datalen_(0) {
-    }
-
-    Buffer::List::~List() {
-        deallocate();
-    }
-
-    void Buffer::List::allocate(bool isLarge) {
         uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
         uint32_t buf = cbt::BUFFER_SIZE;
         if (isLarge) {
@@ -64,7 +57,11 @@ namespace cbt {
         data_ = reinterpret_cast<char*>(malloc(buf));
     }
 
-    void Buffer::List::deallocate() {
+    Buffer::List::~List() {
+        freeBuffers();
+    }
+
+    void Buffer::List::freeBuffers() {
         if (hashes_) {
             free(hashes_);
             hashes_ = NULL;
@@ -87,9 +84,11 @@ namespace cbt {
 
     Buffer::Buffer() :
             compressible_(true), max_last_paos_(0) {
+        pthread_spin_init(&lists_lock_, PTHREAD_PROCESS_PRIVATE);
     }
 
     Buffer::~Buffer() {
+        pthread_spin_destroy(&lists_lock_);
         deallocate();
         if (max_last_paos_ > 0) {
             const Operations* o = node_->tree_->ops;
@@ -99,49 +98,57 @@ namespace cbt {
         }
     }
 
-    Buffer::List* Buffer::addList(bool isLarge/* = false */) {
-        List *l = new List();
-        l->allocate(isLarge);
-        lists_.push_back(l);
-        return l;
-    }
-
     void Buffer::delList(uint32_t ind) {
+        pthread_spin_lock(&lists_lock_);
         if (ind < lists_.size()) {
-            delete lists_[ind];
             lists_.erase(lists_.begin() + ind);
         }
+        pthread_spin_unlock(&lists_lock_);
     }
 
     void Buffer::addList(Buffer::List* l) {
+        pthread_spin_lock(&lists_lock_);
         lists_.push_back(l);
+        pthread_spin_unlock(&lists_lock_);
     }
 
     void Buffer::clear() {
+        pthread_spin_lock(&lists_lock_);
         lists_.clear();
+        pthread_spin_unlock(&lists_lock_);
+    }
+
+    std::vector<Buffer::List*> Buffer::lists_copy() {
+        pthread_spin_lock(&lists_lock_);
+        std::vector<Buffer::List*> lc = lists_;
+        pthread_spin_unlock(&lists_lock_);
+        return lc;
     }
 
     void Buffer::deallocate() {
-        for (uint32_t i = 0; i < lists_.size(); ++i)
+        std::vector<Buffer::List*> lists_c = lists_copy();
+        for (uint32_t i = 0; i < lists_c.size(); ++i)
             delete lists_[i];
         lists_.clear();
     }
 
-    bool Buffer::empty() const {
+    bool Buffer::empty() {
         return (numElements() == 0);
     }
 
-    uint32_t Buffer::numElements() const {
+    uint32_t Buffer::numElements() {
         uint32_t num = 0;
-        for (uint32_t i = 0; i < lists_.size(); ++i)
-            num += lists_[i]->num_;
+        std::vector<Buffer::List*> lists_c = lists_copy();
+        for (uint32_t i = 0; i < lists_c.size(); ++i)
+            num += lists_c[i]->num_;
         return num;
     }
 
-    uint32_t Buffer::size() const {
+    uint32_t Buffer::size() {
         uint32_t siz = 0;
-        for (uint32_t i = 0; i < lists_.size(); ++i)
-            siz += lists_[i]->size_;
+        std::vector<Buffer::List*> lists_c = lists_copy();
+        for (uint32_t i = 0; i < lists_c.size(); ++i)
+            siz += lists_c[i]->size_;
         return siz;
     }
 
@@ -410,11 +417,10 @@ namespace cbt {
             return true;
         }
 
-        aux_list_ = new List();
         if (numElements() < MAX_ELS_PER_BUFFER)
-            aux_list_->allocate(/*large buffer=*/false);
+            aux_list_ = new Buffer::List(/*large buffer=*/false);
         else
-            aux_list_->allocate(/*large buffer=*/true);
+            aux_list_ = new Buffer::List(/*large buffer=*/true);
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
@@ -451,7 +457,7 @@ namespace cbt {
                 }
             }
             // copy hash values
-            List* min_list = lists_[min_index];
+            Buffer::List* min_list = lists_[min_index];
 
             aux_list_->hashes_[aux_list_->num_] = min;
             aux_list_->sizes_[aux_list_->num_] =
@@ -479,7 +485,8 @@ namespace cbt {
     bool Buffer::aggregate(bool isSort) {
         // initialize auxiliary buffer
         Buffer aux;
-        Buffer::List* a = aux.addList();
+        Buffer::List* a = new List();
+        aux.addList(a);
 
         // aggregate elements in buffer
         uint32_t lastIndex = 0;
@@ -602,7 +609,7 @@ namespace cbt {
         // free pointer memory
         free(perm_);
         if (!isSort && lists_.size() > 1)
-            aux_list_->deallocate();
+            aux_list_->freeBuffers();
 
         o->destroyPAO(thisPAO);
 
@@ -625,17 +632,16 @@ namespace cbt {
         // allocate memory for one list
         Buffer compressed;
 
-        for (uint32_t i = 0; i < lists_.size(); ++i) {
-            Buffer::List* l = lists_[i];
+        std::vector<Buffer::List*> lists_c = lists_copy();
+        for (uint32_t i = 0; i < lists_c.size(); ++i) {
+            Buffer::List* l = lists_c[i];
             if (l->state_ == Buffer::List::COMPRESSED || 
                     l->state_ == Buffer::List::PAGED_OUT)
                 continue;
 
             if (!page()) {
-                compressed.addList();
-                // latest added list
-                Buffer::List* cl =
-                    compressed.lists_[compressed.lists_.size()-1];
+                List* cl = new List();
+                compressed.addList(cl);
 #ifdef SNAPPY_COMPRESSION
                 snappy::RawCompress((const char*)l->hashes_,
                         l->num_ * sizeof(uint32_t),
@@ -666,7 +672,7 @@ namespace cbt {
                    &l->c_datalen_);
                  */
 #endif
-                l->deallocate();
+                l->freeBuffers();
                 l->hashes_ = cl->hashes_;
                 l->sizes_ = cl->sizes_;
                 l->data_ = cl->data_;
@@ -698,10 +704,10 @@ namespace cbt {
 #endif  // ENABLE_ASSERT_CHECKS
                 }
                 fflush(f_);
-                l->deallocate();
+                l->freeBuffers();
                 l->state_ = List::PAGED_OUT;
 #ifdef CT_NODE_DEBUG
-                fprintf(stderr, "%d (%lu), ", i, lists_[i]->num_);
+                fprintf(stderr, "%d (%lu), ", i, lists_c[i]->num_);
 #endif  // CT_NODE_DEBUG
             }
         }
@@ -721,15 +727,14 @@ namespace cbt {
         // set file pointer to beginning of file
         rewind(f_);
 
-        for (uint32_t i = 0; i < lists_.size(); ++i) {
-            Buffer::List* cl = lists_[i];
+        std::vector<Buffer::List*> lists_c = lists_copy();
+        for (uint32_t i = 0; i < lists_c.size(); ++i) {
+            Buffer::List* cl = lists_c[i];
             if (cl->state_ == Buffer::List::DECOMPRESSED)
                 continue;
 
-            decompressed.addList();
-            // latest added list
-            Buffer::List* l =
-                decompressed.lists_[decompressed.lists_.size() - 1];
+            List* l = new List();
+            decompressed.addList(l);
 
             if (cl->state_ == Buffer::List::COMPRESSED) {
 #ifdef SNAPPY_COMPRESSION
@@ -759,7 +764,7 @@ namespace cbt {
                    l->data_);
                  */
 #endif
-                cl->deallocate();
+                cl->freeBuffers();
                 cl->hashes_ = l->hashes_;
                 cl->sizes_ = l->sizes_;
                 cl->data_ = l->data_;
@@ -787,7 +792,7 @@ namespace cbt {
                     assert(false);
                 }
 
-                cl->deallocate();
+                cl->freeBuffers();
                 cl->hashes_ = l->hashes_;
                 cl->sizes_ = l->sizes_;
                 cl->data_ = l->data_;

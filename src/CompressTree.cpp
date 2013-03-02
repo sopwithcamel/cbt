@@ -362,19 +362,19 @@ namespace cbt {
     void CompressTree::startThreads() {
         // create root node; initially a leaf
         rootNode_ = new Node(this, 0);
-        rootNode_->buffer_.addList();
+        rootNode_->buffer_.addList(new Buffer::List());
         rootNode_->separator_ = UINT32_MAX;
         rootNode_->buffer_.setCompressible(false);
 
         inputNode_ = new Node(this, 0);
-        inputNode_->buffer_.addList();
+        inputNode_->buffer_.addList(new Buffer::List());
         inputNode_->separator_ = UINT32_MAX;
         inputNode_->buffer_.setCompressible(false);
 
         uint32_t number_of_root_nodes = 4;
         for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
             Node* n = new Node(this, 0);
-            n->buffer_.addList();
+            n->buffer_.addList(new Buffer::List());
             n->separator_ = UINT32_MAX;
             n->buffer_.setCompressible(false);
             emptyRootNodes_.push_back(n);
@@ -438,7 +438,7 @@ namespace cbt {
 
     bool CompressTree::createNewRoot(Node* otherChild) {
         Node* newRoot = new Node(this, rootNode_->level() + 1);
-        newRoot->buffer_.addList();
+        newRoot->buffer_.addList(new Buffer::List());
         newRoot->separator_ = UINT32_MAX;
         newRoot->buffer_.setCompressible(false);
 #ifdef CT_NODE_DEBUG

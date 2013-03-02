@@ -47,13 +47,12 @@ namespace cbt {
                   PAGED_OUT = 2,
                   NUMBER_OF_LIST_STATES = 3,
               };
-              List();
+              // also allocates memory for hashes, sizes and data buffers
+              List(bool isLarge = false);
               ~List();
-              /* allocates buffers */
-              void allocate(bool isLarge);
-              /* frees allocated buffers. Maintains counter info */
-              void deallocate();
-              /* set list to empty */
+              // frees allocated buffers. Maintains counter info
+              void freeBuffers();
+              // set list to empty
               void setEmpty();
 
               uint32_t* hashes_;
@@ -71,23 +70,32 @@ namespace cbt {
           Buffer(const Buffer&);
           // clears all buffer state
           ~Buffer();
-          // add a list and allocate memory
-          List* addList(bool isLarge = false);
+          // add and remove list safely; these only remove the list from the
+          // vector and do not free buffers from the list. Call the destructor
+          // or use freeBuffers() if you want to maintain count information. 
           void addList(List* l);
-          /* clear the lists_ vector. This does not free space allocated
-           * for the buffers but merely deletes the pointers. To avoid
-           * memory leaks, this must be called after deallocate() */
           void delList(uint32_t ind);
+
+          // clears the lists_ vector safely. This does not free space
+          // allocated for the buffers but merely deletes the pointers. To
+          // avoid memory leaks, this must be called after deallocate()
           void clear();
-          /* frees buffers in all the lists. This maintains all the count
-           * information about each of the lists */
+
+          // obtain a copy of the lists, This should be used when performing
+          // operations on the buffer such as compression. This allows the
+          // original vector to be modified.
+          std::vector<List*> lists_copy();
+
+          // frees buffers in all the lists. This maintains all the count
+          // information about each of the lists
           void deallocate();
-          /* returns true if the sum of all the list_s[i]->num_ is zero. This
-           * can happen even if no memory is allocated to the buffers as all
-           * buffers may be compressed */
-          bool empty() const;
-          uint32_t numElements() const;
-          uint32_t size() const;
+
+          // returns true if the sum of all the list_s[i]->num_ is zero. This
+          // can happen even if no memory is allocated to the buffers as all
+          // buffers may be compressed
+          bool empty();
+          uint32_t numElements();
+          uint32_t size();
           void setParent(Node* n);
 
           // paging-related
@@ -117,8 +125,12 @@ namespace cbt {
 
         private:
           const Node* node_;
-          /* buffer fragments */
+          // buffer fragments
           std::vector<List*> lists_;
+          // we use a lock because we expect it to be held for short durations
+          // only, e.g. to add a new list or to make a copy of the lists
+          // vector.
+          pthread_spinlock_t lists_lock_;
           bool compressible_;
           // used during sort
           char** perm_;
