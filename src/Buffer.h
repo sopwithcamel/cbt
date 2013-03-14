@@ -40,10 +40,9 @@ namespace cbt {
           class List {
             public:
               enum ListState {
-                  DECOMPRESSED = 0,
-                  COMPRESSED = 1,
-                  PAGED_OUT = 2,
-                  NUMBER_OF_LIST_STATES = 3,
+                  IN_MEMORY = 0,
+                  PAGED_OUT = 1,
+                  NUMBER_OF_LIST_STATES = 2,
               };
               // also allocates memory for hashes, sizes and data buffers
               List(bool isLarge = false);
@@ -115,9 +114,9 @@ namespace cbt {
           bool aggregate(bool isSort);
 
           /* Compression-related */
-          bool compress();
-          bool decompress();
-          void setCompressible(bool flag);
+          bool page_out();
+          bool page_in();
+          void set_pageable(bool flag);
 
           bool checkSortIntegrity(List* l);
 
@@ -129,7 +128,7 @@ namespace cbt {
           // only, e.g. to add a new list or to make a copy of the lists
           // vector.
           pthread_spinlock_t lists_lock_;
-          bool compressible_;
+          bool pageable_;
           // used during sort
           char** perm_;
           // used during merge

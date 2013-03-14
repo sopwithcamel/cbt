@@ -138,7 +138,7 @@ namespace cbt {
             while (curLeaf->buffer_.numElements() == 0 &&
                     lastLeafRead_ < numLeaves)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->buffer_.decompress();
+            curLeaf->buffer_.page_in();
 
             // also schedule the next leaf for decompression
             uint32_t nextLeafIndex = lastLeafRead_ + 1;
@@ -148,7 +148,7 @@ namespace cbt {
                         nextLeafIndex < numLeaves)
                     nextLeaf = allLeaves_[++nextLeafIndex];
                 if (nextLeafIndex < numLeaves)
-                    nextLeaf->buffer_.decompress();
+                    nextLeaf->buffer_.page_in();
             }
         }
 
@@ -168,7 +168,7 @@ namespace cbt {
         lastElement_++;
 
         if (lastElement_ >= curLeaf->buffer_.numElements()) {
-            curLeaf->buffer_.compress();
+            curLeaf->buffer_.page_out();
             if (++lastLeafRead_ == allLeaves_.size()) {
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Emptying tree!\n");
@@ -194,7 +194,7 @@ namespace cbt {
                         nextLeafIndex < numLeaves)
                     nextLeaf = allLeaves_[++nextLeafIndex];
                 if (nextLeafIndex < numLeaves)
-                    nextLeaf->buffer_.decompress();
+                    nextLeaf->buffer_.page_in();
             }
             lastOffset_ = 0;
             lastElement_ = 0;
@@ -362,19 +362,19 @@ namespace cbt {
         rootNode_ = new Node(this, 0);
         rootNode_->buffer_.addList(new Buffer::List());
         rootNode_->separator_ = UINT32_MAX;
-        rootNode_->buffer_.setCompressible(false);
+        rootNode_->buffer_.set_pageable(false);
 
         inputNode_ = new Node(this, 0);
         inputNode_->buffer_.addList(new Buffer::List());
         inputNode_->separator_ = UINT32_MAX;
-        inputNode_->buffer_.setCompressible(false);
+        inputNode_->buffer_.set_pageable(false);
 
         uint32_t number_of_root_nodes = 4;
         for (uint32_t i = 0; i < number_of_root_nodes - 1; ++i) {
             Node* n = new Node(this, 0);
             n->buffer_.addList(new Buffer::List());
             n->separator_ = UINT32_MAX;
-            n->buffer_.setCompressible(false);
+            n->buffer_.set_pageable(false);
             emptyRootNodes_.push_back(n);
         }
 
@@ -416,7 +416,7 @@ namespace cbt {
         Node* newRoot = new Node(this, rootNode_->level() + 1);
         newRoot->buffer_.addList(new Buffer::List());
         newRoot->separator_ = UINT32_MAX;
-        newRoot->buffer_.setCompressible(false);
+        newRoot->buffer_.set_pageable(false);
 #ifdef CT_NODE_DEBUG
         fprintf(stderr, "Node %d is new root; children are %d and %d\n",
                 newRoot->id_, rootNode_->id_, otherChild->id_);

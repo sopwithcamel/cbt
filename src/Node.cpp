@@ -119,7 +119,7 @@ namespace cbt {
         uint32_t siz = buffer_.size();        
 
         if (!isFull()) {
-            buffer_.compress();
+            buffer_.page_out();
         } else {
             schedule(EMPTY);
         }
@@ -144,7 +144,7 @@ namespace cbt {
                         %u/%u\n", id_, buffer_.size(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
-                buffer_.compress();
+                buffer_.page_out();
             }
             return true;
         }
@@ -263,9 +263,9 @@ namespace cbt {
     void Node::handleFullLeaf() {
         Node* newLeaf = splitLeaf();
 
-        buffer_.compress();
+        buffer_.page_out();
         if (newLeaf) {
-            newLeaf->buffer_.compress();
+            newLeaf->buffer_.page_out();
         }
     }
 
@@ -321,7 +321,7 @@ namespace cbt {
 
         // if leaf is also the root, create new root
         if (isRoot()) {
-            buffer_.setCompressible(true);
+            buffer_.set_pageable(true);
             tree_->createNewRoot(newLeaf);
         } else {
             parent_->addChild(newLeaf);
@@ -458,7 +458,7 @@ namespace cbt {
 #endif
 
         if (isRoot()) {
-            buffer_.setCompressible(true);
+            buffer_.set_pageable(true);
             buffer_.deallocate();
             return tree_->createNewRoot(newNode);
         } else {
@@ -564,7 +564,7 @@ namespace cbt {
             case EMPTY:
                 {
                     if (!rootFlag) {
-                        buffer_.decompress();
+                        buffer_.page_in();
                         buffer_.merge();
                         buffer_.aggregate(/*isSort = */false);
                     }
