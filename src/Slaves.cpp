@@ -349,9 +349,7 @@ namespace cbt {
     }
 
     void Emptier::work(Node* n) {
-        n->wait(MERGE);
         bool is_root = n->isRoot();
-
         n->perform(EMPTY);
 
         // No other node is dependent on the root. Performing this check also
@@ -394,100 +392,5 @@ namespace cbt {
         pthread_spin_lock(&nodesLock_);
         queue_.printElements();
         pthread_spin_unlock(&nodesLock_);
-    }
-
-    // Compressor
-
-    Compressor::Compressor(CompressTree* tree) :
-            Slave(tree) {
-    }
-
-    Compressor::~Compressor() {
-    }
-
-    void Compressor::work(Node* n) {
-        if (n->schedule_mask_.is_set(COMPRESS)) {
-            n->perform(COMPRESS);
-            n->done(COMPRESS);
-        }
-    }
-
-    void Compressor::addNode(Node* node) {
-        addNodeToQueue(node);
-
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "adding node %d (size: %u) to compress: ",
-                node->id_, node->buffer_.numElements());
-        printElements();
-#endif  // CT_NODE_DEBUG
-    }
-
-    std::string Compressor::getSlaveName() const {
-        return "Compressor";
-    }
-
-    // Decompressor
-
-    Decompressor::Decompressor(CompressTree* tree) :
-            Slave(tree) {
-    }
-
-    Decompressor::~Decompressor() {
-    }
-
-    void Decompressor::work(Node* n) {
-        // DECOMPRESS can never be cancelled
-        n->perform(DECOMPRESS);
-        n->done(DECOMPRESS);
-    }
-
-    void Decompressor::addNode(Node* node) {
-        addNodeToQueue(node);
-#ifdef CT_NODE_DEBUG
-        fprintf(stderr, "adding node %d (size: %u) to decompress: ",
-                node->id_, node->buffer_.numElements());
-        printElements();
-#endif  // CT_NODE_DEBUG
-    }
-
-    std::string Decompressor::getSlaveName() const {
-        return "Decompressor";
-    }
-
-    // Merger
-
-    Merger::Merger(CompressTree* tree) :
-            Slave(tree) {
-    }
-
-    Merger::~Merger() {
-    }
-
-    void Merger::work(Node* n) {
-        // block until buffer is decompressed
-        n->wait(DECOMPRESS);
-        // perform merge
-        n->perform(MERGE);
-        // schedule for emptying
-        n->schedule(EMPTY);
-        // indicate that we're done sorting
-        n->done(MERGE);
-    }
-
-    void Merger::addNode(Node* node) {
-        if (node) {
-            // Set node as queued for emptying
-            addNodeToQueue(node);
-
-#ifdef CT_NODE_DEBUG
-            fprintf(stderr, "Node %d (size: %u) added to to-merge list: ",
-                    node->id_, node->buffer_.numElements());
-            printElements();
-#endif  // CT_NODE_DEBUG
-        }
-    }
-
-    std::string Merger::getSlaveName() const {
-        return "Merger";
     }
 }

@@ -35,8 +35,6 @@ namespace cbt {
     class Buffer {
         friend class Node;
         friend class CompressTree;
-        friend class Compressor;
-        friend class Decompressor;
 
         public:
           class List {

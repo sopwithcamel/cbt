@@ -173,47 +173,5 @@ namespace cbt {
 
         PriorityDAG queue_;
     };
-
-    class Compressor : public Slave {
-      public:
-        explicit Compressor(CompressTree* tree);
-        ~Compressor();
-        void work(Node* n);
-        void addNode(Node* node);
-
-      protected:
-        virtual std::string getSlaveName() const;
-
-      private:
-        friend class Node;
-    };
-
-    class Decompressor : public Slave {
-      public:
-        explicit Decompressor(CompressTree* tree);
-        ~Decompressor();
-        void work(Node* n);
-        void addNode(Node* node);
-
-      protected:
-        virtual std::string getSlaveName() const;
-
-      private:
-        friend class Node;
-    };
-
-    class Merger : public Slave {
-      public:
-        explicit Merger(CompressTree* tree);
-        ~Merger();
-        void work(Node* n);
-        void addNode(Node* node);
-
-      protected:
-        virtual std::string getSlaveName() const;
-
-      private:
-        friend class Node;
-    };
 }
 #endif  // SRC_SLAVES_H_

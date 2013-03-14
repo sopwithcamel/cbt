@@ -37,17 +37,11 @@ namespace cbt {
     class Buffer;
     class CompressTree;
     class Emptier;
-    class Decompressor;
-    class Compressor;
-    class Merger;
 
     enum NodeState {
         DEFAULT = 0,
-        DECOMPRESS = 1,
-        COMPRESS = 2,
-        SORT = 3,
-        MERGE = 4,
-        EMPTY = 5,
+        SORT = 1,
+        EMPTY = 2,
     };
 
     struct StateMask {

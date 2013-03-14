@@ -138,8 +138,7 @@ namespace cbt {
             while (curLeaf->buffer_.numElements() == 0 &&
                     lastLeafRead_ < numLeaves)
                 curLeaf = allLeaves_[++lastLeafRead_];
-            curLeaf->schedule(DECOMPRESS);
-            curLeaf->wait(DECOMPRESS);
+            curLeaf->buffer_.decompress();
 
             // also schedule the next leaf for decompression
             uint32_t nextLeafIndex = lastLeafRead_ + 1;
@@ -149,7 +148,7 @@ namespace cbt {
                         nextLeafIndex < numLeaves)
                     nextLeaf = allLeaves_[++nextLeafIndex];
                 if (nextLeafIndex < numLeaves)
-                    nextLeaf->schedule(DECOMPRESS);
+                    nextLeaf->buffer_.decompress();
             }
         }
 
@@ -169,7 +168,7 @@ namespace cbt {
         lastElement_++;
 
         if (lastElement_ >= curLeaf->buffer_.numElements()) {
-            curLeaf->schedule(COMPRESS);
+            curLeaf->buffer_.compress();
             if (++lastLeafRead_ == allLeaves_.size()) {
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Emptying tree!\n");
@@ -185,9 +184,8 @@ namespace cbt {
                 return false;
             }
             Node *n = allLeaves_[lastLeafRead_];
-            // has already been scheduled for decompression, so wait...
-            n->wait(DECOMPRESS);
-            // also schedule the next leaf for decompression
+            // has already been decompressed
+            // also decompress next leaf
             uint32_t nextLeafIndex = lastLeafRead_ + 1;
             uint32_t numLeaves = allLeaves_.size();
             if (nextLeafIndex < numLeaves) {
@@ -196,7 +194,7 @@ namespace cbt {
                         nextLeafIndex < numLeaves)
                     nextLeaf = allLeaves_[++nextLeafIndex];
                 if (nextLeafIndex < numLeaves)
-                    nextLeaf->schedule(DECOMPRESS);
+                    nextLeaf->buffer_.decompress();
             }
             lastOffset_ = 0;
             lastElement_ = 0;
@@ -382,38 +380,19 @@ namespace cbt {
 
         emptyType_ = IF_FULL;
 
-        uint32_t mergerThreadCount = 4;
-        uint32_t compressorThreadCount = 4;
-        uint32_t decompressorThreadCount = 4;
         uint32_t emptierThreadCount = 4;
         uint32_t sorterThreadCount = 4;
 
         // One for the inserter
-        uint32_t threadCount = mergerThreadCount + compressorThreadCount +
-                decompressorThreadCount + emptierThreadCount +
-                sorterThreadCount + 1;
+        uint32_t threadCount = emptierThreadCount + sorterThreadCount + 1;
         pthread_barrier_init(&threadsBarrier_, NULL, threadCount);
         sem_init(&sleepSemaphore_, 0, threadCount - 1);
 
         sorter_ = new Sorter(this);
         sorter_->startThreads(sorterThreadCount);
 
-        merger_ = new Merger(this);
-        merger_->startThreads(mergerThreadCount);
-
-        decompressor_ = new Decompressor(this);
-        decompressor_->startThreads(decompressorThreadCount);
-
-        compressor_ = new Compressor(this);
-        compressor_->startThreads(compressorThreadCount);
-
         emptier_ = new Emptier(this);
         emptier_->startThreads(emptierThreadCount);
-
-#ifdef ENABLE_COUNTERS
-        monitor_ = new Monitor(this);
-        monitor_->startThreads(monitorThreadCount);
-#endif
 
         pthread_barrier_wait(&threadsBarrier_);
         threadsStarted_ = true;
@@ -425,11 +404,8 @@ namespace cbt {
 
         delete inputNode_;
 
-        merger_->stopThreads();
         sorter_->stopThreads();
         emptier_->stopThreads();
-        compressor_->stopThreads();
-        decompressor_->stopThreads();
 #ifdef ENABLE_COUNTERS
         monitor_->stopThreads();
 #endif

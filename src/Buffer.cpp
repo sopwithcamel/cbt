@@ -834,6 +834,7 @@ namespace cbt {
     }
 
     bool Buffer::page() {
+/*
         FILE *file = fopen("/proc/self/statm", "r");
         unsigned long vm = 0, res = 0;
         if (file) {
@@ -844,6 +845,8 @@ namespace cbt {
             return true;
         }
         return false;
+*/
+        return true;
     }
 
     bool Buffer::checkSortIntegrity(List* l) {
