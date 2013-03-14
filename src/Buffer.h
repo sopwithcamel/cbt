@@ -45,8 +45,15 @@ namespace cbt {
                   PAGED_OUT = 1,
                   NUMBER_OF_LIST_STATES = 2,
               };
+
+              enum AllocType {
+                  NO_ALLOC = 0,
+                  NORMAL_ALLOC = 1,
+                  LARGE_ALLOC = 2,
+                  NUMBER_OF_ALLOC_TYPES = 3,
+              };
               // also allocates memory for hashes, sizes and data buffers
-              List(bool fd_req = false, bool isLarge = false);
+              List(bool fd_req = false, AllocType type = NORMAL_ALLOC);
               ~List();
               // frees allocated buffers. Maintains counter info
               void free_buffers();

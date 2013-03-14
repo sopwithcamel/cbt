@@ -39,7 +39,7 @@
 #include "lz4.h"
 
 namespace cbt {
-    Buffer::List::List(bool fd_req, bool isLarge) :
+    Buffer::List::List(bool fd_req, AllocType type) :
             state_(IN_MEMORY),
             hashes_(NULL),
             sizes_(NULL),
@@ -49,15 +49,18 @@ namespace cbt {
             beg_offset_(0),
             size_(0),
             fd_(-1) {
-        uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
-        uint32_t buf = cbt::BUFFER_SIZE;
-        if (isLarge) {
-            nel *= 2;
-            buf *= 2;
+
+        if (type != NO_ALLOC) {
+            uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
+            uint32_t buf = cbt::BUFFER_SIZE;
+            if (type == LARGE_ALLOC) {
+                nel *= 2;
+                buf *= 2;
+            }
+            hashes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
+            sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
+            data_ = reinterpret_cast<char*>(malloc(buf));
         }
-        hashes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
-        sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
-        data_ = reinterpret_cast<char*>(malloc(buf));
 
         if (fd_req) {
             do {
@@ -439,11 +442,10 @@ namespace cbt {
         }
 
         if (numElements() < MAX_ELS_PER_BUFFER)
-            aux_list_ = new Buffer::List(/*fd_req = */true,
-                    /*large buffer=*/false);
+            aux_list_ = new Buffer::List(/*fd_req = */true);
         else
             aux_list_ = new Buffer::List(/*fd_req = */true,
-                    /*large buffer=*/true);
+                    /*AllocType = */LARGE_ALLOC);
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization

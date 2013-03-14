@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <time.h>
 
 #include <queue>
@@ -256,6 +257,100 @@ namespace cbt {
         return true;
     }
 
+    bool Node::fastSplitLeaf() {
+        Node* newLeaf = new Node(tree_, 0);
+        uint32_t new_separator_ = 0;
+        uint32_t buf_size = 64;
+        char* buf = (char*)malloc(buf_size);
+
+        for (uint32_t i = 0; i < buffer_.lists_.size(); ++i) {
+            Buffer::List* new_list = new Buffer::List(false,
+                    Buffer::List::NO_ALLOC);
+            Buffer::List* l = buffer_.lists_[i];
+
+            if ((new_list->fd_ = dup(l->fd_)) < 0) {
+                fprintf(stderr, "Error: %s\n", strerror(errno));
+                assert(false);
+            }
+            new_list->state_ = Buffer::List::PAGED_OUT;
+
+            // for each list, we wish to find where the list will be split
+            uint32_t num_elements_in_split_list;
+
+            if (i == 0) {
+                // we are going to use the median element in the first list as
+                // the separator for the entire node split.
+
+                uint32_t num = l->num_ / 2;
+                size_t off;
+                uint32_t* h = (uint32_t*)buf;
+                uint32_t num_hashes_in_buf = buf_size / sizeof(uint32_t);
+                uint32_t splitIndex = num_hashes_in_buf;
+                do {
+                    // check if we have reached the end of the buffer and still
+                    // haven't found a hash that is different from the previous
+                    // hash. If this is the case then, we read in another page.
+                    if (splitIndex == num_hashes_in_buf) {
+                        off = num * sizeof(uint32_t);
+                        if ((ret = pread64(l->fd_, (void*)buf, buf_size, off)) <
+                                buf_size) {
+                            fprintf(stderr, "Error: %s\n", strerror(errno));
+                            assert(false);
+                        }
+                        num += num_hashes_in_buf;
+                        splitIndex = 0;
+                    }
+                    splitIndex++;
+                } while (h[splitIndex] == h[splitIndex - 1]);
+                
+                // now we know the element that we use to split
+                new_separator_ = h[splitIndex];
+
+                // for the new list, this element will also be the first element
+                num_elements_in_split_list = off / sizeof(uint32_t) +
+                        splitIndex;
+            } else {
+                // for other lists, we need to find the first hash value that
+                // is greater than or equal to the separator value
+
+                // read buffer containing the median element
+                uint32_t num = l->num_ / 2;
+                size_t off = num * sizeof(uint32_t);
+                uint32_t* h = (uint32_t*)buf;
+                uint32_t num_hashes_in_buf = buf_size / sizeof(uint32_t);
+                uint32_t low_hash = 0, high_hash = 0;
+                // we loop and read in buffers until we have found a buffer
+                // that contains the separator element
+                do {
+                    if ((ret = pread64(l->fd_, (void*)buf, buf_size, off)) <
+                            buf_size) {
+                        fprintf(stderr, "Error: %s\n", strerror(errno));
+                        assert(false);
+                    }
+                    low_hash = h[0];
+                    high_hash = h[num_hashes_in_buf - 1];
+                    if (new_separator_ < low_hash) {
+                        off -= buf_size;
+                    } else if (new_separator_ > high_hash) {
+                        off += buf_size;
+                    } else
+                        break;
+                } while (true);
+
+                // 
+            }
+
+            new_list->num_ = l->num_ - num_elements_in_split_list;
+            l->num_ = num_elements_in_split_list;
+
+            new_list->beg_index_ = 
+
+            newLeaf->buffer_.addList(new_list);
+        }
+
+        free(buf);
+    }
+
     void Node::handleFullLeaf() {
         Node* newLeaf = splitLeaf();
 
@@ -265,9 +360,9 @@ namespace cbt {
         }
     }
 
-    /* A leaf is split by moving half the elements of the buffer into a
-     * new leaf and inserting a median value as the separator element into the
-     * parent */
+    // A leaf is split by moving half the elements of the buffer into a
+    // new leaf and inserting a median value as the separator element into the
+    // parent
     Node* Node::splitLeaf() {
         checkIntegrity();
 #ifdef ENABLE_ASSERT_CHECKS
@@ -276,7 +371,7 @@ namespace cbt {
 
         // select splitting index
         uint32_t num = buffer_.numElements();
-        uint32_t splitIndex = num/2;
+        uint32_t splitIndex = num / 2;
         Buffer::List* l = buffer_.lists_[0];
         while (l->hashes_[splitIndex] == l->hashes_[splitIndex-1]) {
             splitIndex++;
@@ -544,6 +639,7 @@ namespace cbt {
 
     void Node::perform(const NodeState& state) {
         bool rootFlag = isRoot();
+        bool leafFlag = isLeaf();
         switch (state) {
             case SORT:
                 {
@@ -559,6 +655,11 @@ namespace cbt {
                 break;
             case EMPTY:
                 {
+                    // check for fast case of splitting leaves
+                    if (!rootFlag && leafFlag) {
+                        if (fastSplitLeaf())
+                            break; 
+                    }
                     if (!rootFlag) {
                         buffer_.page_in();
                         buffer_.merge();

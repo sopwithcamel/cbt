@@ -122,8 +122,8 @@ namespace cbt {
       public:
         explicit Node(CompressTree* tree, uint32_t level);
         ~Node();
-        /* copy user data into buffer. Buffer should be decompressed
-           before calling. */
+        // copy user data into buffer. Buffer should be decompressed
+        // before calling.
         bool insert(PartialAgg* agg);
 
         // identification functions
@@ -135,44 +135,45 @@ namespace cbt {
         uint32_t id() const;
 
       private:
-        /* Buffer handling functions */
+        // Buffer handling functions
 
         bool emptyOrCompress();
-        /* Responsible for handling the spilling of the buffer. */
+        // Responsible for handling the spilling of the buffer.
         bool spillBuffer();
-        /* Function: empty the buffer into the buffers in the next level.
-         *  + Must be called with buffer decompressed.
-         *  + Buffer will be freed after invocation.
-         *  + If children buffers overflow, it recursively calls itself.
-         *    until the recursion reaches the leaves. At this stage, handling
-         *    the leaf buffer overflows is queued for later because this may
-         *    cause splitting (recursively) up the tree which is best done
-         *    when no internal nodes are over-full.
-         *  + an emptyBuffer() invocation should be followed by a
-         *    handleFullLeaves() call.
-         */
+        // Function: empty the buffer into the buffers in the next level.
+        //  + Must be called with buffer decompressed.
+        //  + Buffer will be freed after invocation.
+        //  + If children buffers overflow, it recursively calls itself.
+        //    until the recursion reaches the leaves. At this stage, handling
+        //    the leaf buffer overflows is queued for later because this may
+        //    cause splitting (recursively) up the tree which is best done
+        //    when no internal nodes are over-full.
+        //  + an emptyBuffer() invocation should be followed by a
+        //    handleFullLeaves() call.
+        // 
         bool emptyBuffer();
-        /* copy contents from node's buffer into this buffer. Starting from
-         * index = index, copy num elements' data.
-         */
+        // copy contents from node's buffer into this buffer. Starting from
+        // index = index, copy num elements' data.
+        // 
         bool copyIntoBuffer(Buffer::List* l, uint32_t index, uint32_t num);
 
-        /* Tree-related functions */
+        // Tree-related functions
 
+        bool fastSplitLeaf();
         // handle full leaves
         void handleFullLeaf();
 
         // split leaf node and return new leaf
         Node* splitLeaf();
-        /* Add a new child to the node; the child type indicates which side
-         * of the separator the child must be inserted.
-         * if the number of children is more than the allowed number:
-         * + first check if siblings have fewer children
-         * + if not, split the node into two and call addChild recursively
-         */
+        // Add a new child to the node; the child type indicates which side
+        // of the separator the child must be inserted.
+        // if the number of children is more than the allowed number:
+        // + first check if siblings have fewer children
+        // + if not, split the node into two and call addChild recursively
+        // 
         bool addChild(Node* newNode);
-        /* Split non-leaf node; must be called with the buffer decompressed
-         * and sorted. If called on the root, then a new root is created */
+        // Split non-leaf node; must be called with the buffer decompressed
+        // and sorted. If called on the root, then a new root is created */
         bool splitNonLeaf();
         bool checkIntegrity();
         bool checkSerializationIntegrity(int listn=-1);
@@ -204,11 +205,11 @@ namespace cbt {
         Buffer buffer_;
         pthread_mutex_t bufferMutex_;
         uint32_t id_;
-        /* level in the tree; 0 at leaves and increases upwards */
+        // level in the tree; 0 at leaves and increases upwards
         uint32_t level_;
         Node* parent_;
 
-        /* Pointers to children */
+        // Pointers to children
         std::vector<Node*> children_;
         pthread_mutex_t childrenMutex_;
         uint32_t separator_;
