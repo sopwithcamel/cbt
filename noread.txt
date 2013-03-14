@@ -1,0 +1,39 @@
+
+Low cost split-leaf:
+
+When a leaf has to be split, we note that its buffer consists of multiple
+sorted lists that are on disk. We perform a low-cost split like so:
+* create a new leaf
+* for each list in the full leaf, create a list in the new leaf. A list must
+ store the following information:
+  a. the file descriptor of the file containing its data on disk
+  b. starting offset into file
+  c. ending offset into file
+  d. beginning index in hash and size arrays
+  e. ending index in hash and size arrays
+* the separating index can be chosen using the median hash from the first
+  list in the full leaf
+
+File descriptors will be shared across nodes and access needs to be
+synchronized:
+* store all fds centrally along with locks (hmm, no)
+* use pread/pwrite
+
+When do we "clean up"?
+We need to merge the lists in the leaf at some point. Key/values may repeat in
+the different lists, and older values need to be garbage-collected. We can decide
+this using some threshold on the number of lists.
+
+Deciding that is ok to delete a file might require ref-counting. A particular
+list on disk can be referenced by multiple nodes. Once each of these nodes has
+"cleaned up" (ie. read all its lists, merged, and written out the merged list)
+then it is ok for the file to be deleted.
+
+Problem:
+* hash and size arrays are also stored on disk. How do we find the offset when
+ splitting?
+Potential solution: for hash, start with the median index i and increment i
+until hash[i] <> hash[i-1]; for offset, modify the size array to store
+cumulative sizes (ie. offsets) instead since this doesn't matter like it for
+compression. This allows both the splitting hash and offset to be determined
+using a few I/Os per list.
