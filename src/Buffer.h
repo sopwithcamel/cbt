@@ -100,23 +100,22 @@ namespace cbt {
           void cleanupPaging();
           // decide whether a buffer must be paged or compressed
           bool page();
+          bool page_out();
+          bool page_in();
+          void set_pageable(bool flag);
 
-          /* Sorting-related */
+
+          // Sorting-related
           void quicksort(uint32_t left, uint32_t right);
           void radixsort(uint32_t left, uint32_t right, uint32_t shift);
           void insertion_sort(uint32_t left, uint32_t right);
           bool sort();
 
-          /* Merge the sorted sub-lists of the buffer */
+          // Merge the sorted sub-lists of the buffer
           bool merge();
 
-          /* Aggregation-related */
+          // Aggregation-related
           bool aggregate(bool isSort);
-
-          /* Compression-related */
-          bool page_out();
-          bool page_in();
-          void set_pageable(bool flag);
 
           bool checkSortIntegrity(List* l);
 
