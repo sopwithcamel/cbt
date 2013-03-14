@@ -23,9 +23,12 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
-#include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <sstream>
 #include "Buffer.h"
@@ -36,16 +39,16 @@
 #include "lz4.h"
 
 namespace cbt {
-    Buffer::List::List(bool isLarge) :
+    Buffer::List::List(bool fd_req, bool isLarge) :
+            state_(IN_MEMORY),
             hashes_(NULL),
             sizes_(NULL),
             data_(NULL),
+            beg_index_(0),
             num_(0),
+            beg_offset_(0),
             size_(0),
-            state_(IN_MEMORY),
-            c_hashlen_(0),
-            c_sizelen_(0),
-            c_datalen_(0) {
+            fd_(-1) {
         uint32_t nel = cbt::MAX_ELS_PER_BUFFER;
         uint32_t buf = cbt::BUFFER_SIZE;
         if (isLarge) {
@@ -55,13 +58,31 @@ namespace cbt {
         hashes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
         sizes_ = reinterpret_cast<uint32_t*>(malloc(sizeof(uint32_t) * nel));
         data_ = reinterpret_cast<char*>(malloc(buf));
+
+        if (fd_req) {
+            do {
+                stringstream ss;
+                ss << "/mnt/hamur/cbt_data/" << rand() << ".buf";
+                filename_ = ss.str();
+                fd_ = open(filename_.c_str(), O_RDWR | O_CREAT | O_EXCL,
+                        S_IRUSR | S_IWUSR);
+            } while (fd_ < 0 && errno == EEXIST);
+            if (fd_ < 0) {
+                fprintf(stderr, "Error opening file: %s\n", strerror(errno));
+                assert(false);
+            }
+        }
     }
 
     Buffer::List::~List() {
-        freeBuffers();
+        free_buffers();
+        if (fd_ > 0) {
+            // decrement ref-count for fd_; if 0 then close and delete file
+            close(fd_);
+        }
     }
 
-    void Buffer::List::freeBuffers() {
+    void Buffer::List::free_buffers() {
         if (hashes_) {
             free(hashes_);
             hashes_ = NULL;
@@ -392,7 +413,7 @@ namespace cbt {
             offset += lists_[0]->sizes_[i];
         }
 
-        // quicksort elements
+        // sort elements
 //        quicksort(0, num - 1);
         radixsort(0, num, 24);
         return true;
@@ -418,9 +439,11 @@ namespace cbt {
         }
 
         if (numElements() < MAX_ELS_PER_BUFFER)
-            aux_list_ = new Buffer::List(/*large buffer=*/false);
+            aux_list_ = new Buffer::List(/*fd_req = */true,
+                    /*large buffer=*/false);
         else
-            aux_list_ = new Buffer::List(/*large buffer=*/true);
+            aux_list_ = new Buffer::List(/*fd_req = */true,
+                    /*large buffer=*/true);
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
@@ -485,7 +508,7 @@ namespace cbt {
     bool Buffer::aggregate(bool isSort) {
         // initialize auxiliary buffer
         Buffer aux;
-        Buffer::List* a = new List();
+        Buffer::List* a = new List(/*fd_req = */true);
         aux.addList(a);
 
         // aggregate elements in buffer
@@ -609,7 +632,7 @@ namespace cbt {
         // free pointer memory
         free(perm_);
         if (!isSort && lists_.size() > 1)
-            aux_list_->freeBuffers();
+            aux_list_->free_buffers();
 
         o->destroyPAO(thisPAO);
 
@@ -637,16 +660,12 @@ namespace cbt {
 
             if (page()) {
                 size_t ret1, ret2, ret3;
-                ret1 = fwrite(l->hashes_, 1,
-                        l->num_ * sizeof(uint32_t), f_);
-                ret2 = fwrite(l->sizes_, 1,
-                        l->num_ * sizeof(uint32_t), f_);
-                ret3 = fwrite(l->data_, 1,
-                        l->size_, f_);
+                ret1 = write(l->fd_, l->hashes_, l->num_ * sizeof(uint32_t));
+                ret2 = write(l->fd_, l->sizes_, l->num_ * sizeof(uint32_t));
+                ret3 = write(l->fd_, l->data_, l->size_);
                 if (ret1 != l->num_ * sizeof(uint32_t) ||
                         ret2 != l->num_ * sizeof(uint32_t) ||
                         ret3 != l->size_) {
-                    assert(false);
 #ifdef ENABLE_ASSERT_CHECKS
                     fprintf(stderr, "Node %d page-out fail! Error: %s\n",
                             node_->id_, strerror(errno));
@@ -656,9 +675,9 @@ namespace cbt {
                             l->num_ * sizeof(uint32_t), ret2,
                             l->size_, ret3);
 #endif  // ENABLE_ASSERT_CHECKS
+                    assert(false);
                 }
-                fflush(f_);
-                l->freeBuffers();
+                l->free_buffers();
                 l->state_ = List::PAGED_OUT;
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "%d (%lu), ", i, lists_c[i]->num_);
@@ -676,8 +695,6 @@ namespace cbt {
 
         // allocate memory for paged-in buffers
         Buffer paged_in;
-        // set file pointer to beginning of file
-        rewind(f_);
 
         std::vector<Buffer::List*> lists_c = lists_copy();
         for (uint32_t i = 0; i < lists_c.size(); ++i) {
@@ -688,13 +705,15 @@ namespace cbt {
             List* l = new List();
             paged_in.addList(l);
 
+            // set file pointer to beginning offset
+            assert(lseek(cl->fd_, cl->beg_offset_, SEEK_SET) ==
+                    cl->beg_offset_);
+
             // means the list is PAGED_OUT
             size_t ret1, ret2, ret3;
-            ret1 = fread(l->hashes_, 1,
-                    cl->num_ * sizeof(uint32_t), f_);
-            ret2 = fread(l->sizes_, 1,
-                    cl->num_ * sizeof(uint32_t), f_);
-            ret3 = fread(l->data_, 1, cl->size_, f_);
+            ret1 = read(cl->fd_, l->hashes_, cl->num_ * sizeof(uint32_t));
+            ret2 = read(cl->fd_, l->sizes_, cl->num_ * sizeof(uint32_t));
+            ret3 = read(cl->fd_, l->data_, cl->size_);
             if (ret1 != cl->num_ * sizeof(uint32_t) ||
                     ret2 != cl->num_ * sizeof(uint32_t) ||
                     ret3 != cl->size_) {
@@ -711,7 +730,7 @@ namespace cbt {
                 assert(false);
             }
 
-            cl->freeBuffers();
+            cl->free_buffers();
             cl->hashes_ = l->hashes_;
             cl->sizes_ = l->sizes_;
             cl->data_ = l->data_;
@@ -723,9 +742,6 @@ namespace cbt {
         fprintf(stderr, "paged_in node %d; n: %u\n",
                 node_->id_, numElements());
 #endif  // CT_NODE_DEBUG
-
-        // set file pointer to beginning of file
-        rewind(f_);
 #endif  // ENABLE_COMPRESSION
         return true;
     }
@@ -733,22 +749,6 @@ namespace cbt {
     void Buffer::set_pageable(bool flag) {
         // TODO Synchrnonization required
         pageable_ = flag;
-    }
-
-    void Buffer::setupPaging() {
-        stringstream fileName;
-        fileName << "/mnt/hamur/cbt_data/";
-        fileName << node_->tree_->tree_prefix_ << "-" << node_->id_;
-        fileName << ".buf";
-        f_ = fopen(fileName.str().c_str(), "w+");
-        if (f_ == NULL) {
-            fprintf(stderr, "Error opening file: %s\n", strerror(errno));
-            assert(false);
-        }
-    }
-
-    void Buffer::cleanupPaging() {
-        fclose(f_);
     }
 
     bool Buffer::page() {

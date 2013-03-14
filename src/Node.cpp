@@ -56,8 +56,6 @@ namespace cbt {
 
         pthread_mutex_init(&compMutex_, NULL);
         pthread_cond_init(&compCond_, NULL);
-
-        buffer_.setupPaging();
     }
 
     Node::~Node() {
@@ -69,8 +67,6 @@ namespace cbt {
 
         pthread_mutex_destroy(&compMutex_);
         pthread_cond_destroy(&compCond_);
-
-        buffer_.cleanupPaging();
     }
 
     bool Node::insert(PartialAgg* agg) {
@@ -342,7 +338,7 @@ namespace cbt {
             num_bytes += parent_list->sizes_[index + i];
         }
 #ifdef ENABLE_ASSERT_CHECKS
-        assert(parent_list->state_ == Buffer::List::DECOMPRESSED);
+        assert(parent_list->state_ == Buffer::List::IN_MEMORY);
         if (num_bytes >= BUFFER_SIZE) {
             fprintf(stderr, "Node: %d, buf: %d\n", id_,
                     num_bytes);
@@ -350,7 +346,7 @@ namespace cbt {
         }
 #endif
         // allocate a new List in the buffer and copy data into it
-        Buffer::List* l = new Buffer::List();
+        Buffer::List* l = new Buffer::List(/*fd_req = */true);
 
         // memset(l->hashes_, 0, num * sizeof(uint32_t));
         memcpy(l->hashes_, parent_list->hashes_ + index,

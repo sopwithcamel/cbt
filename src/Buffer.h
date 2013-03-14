@@ -25,6 +25,7 @@
 #define SRC_BUFFER_H_
 #include <stdint.h>
 #include <stdio.h>
+#include <string>
 #include <vector>
 #include "Config.h"
 #include "PartialAgg.h"
@@ -45,22 +46,27 @@ namespace cbt {
                   NUMBER_OF_LIST_STATES = 2,
               };
               // also allocates memory for hashes, sizes and data buffers
-              List(bool isLarge = false);
+              List(bool fd_req = false, bool isLarge = false);
               ~List();
               // frees allocated buffers. Maintains counter info
-              void freeBuffers();
+              void free_buffers();
               // set list to empty
               void setEmpty();
 
+              ListState state_;
+              // only used when the list state is IN_MEMORY
               uint32_t* hashes_;
               uint32_t* sizes_;
               char* data_;
+
+              // stores list boundaries in file
+              uint32_t beg_index_;
               uint32_t num_;
+              uint32_t beg_offset_;
               uint32_t size_;
-              ListState state_;
-              size_t c_hashlen_;
-              size_t c_sizelen_;
-              size_t c_datalen_;
+
+              int fd_;
+              std::string filename_;
           };
 
           Buffer();
@@ -69,7 +75,7 @@ namespace cbt {
           ~Buffer();
           // add and remove list safely; these only remove the list from the
           // vector and do not free buffers from the list. Call the destructor
-          // or use freeBuffers() if you want to maintain count information. 
+          // or use free_buffers() if you want to maintain count information. 
           void addList(List* l);
           void delList(uint32_t ind);
 
@@ -96,14 +102,12 @@ namespace cbt {
           void setParent(Node* n);
 
           // paging-related
-          void setupPaging();
-          void cleanupPaging();
+
           // decide whether a buffer must be paged or compressed
           bool page();
           bool page_out();
           bool page_in();
           void set_pageable(bool flag);
-
 
           // Sorting-related
           void quicksort(uint32_t left, uint32_t right);
@@ -134,9 +138,6 @@ namespace cbt {
           List* aux_list_;
           std::vector<PartialAgg*> lastPAOs_;
           uint32_t max_last_paos_;
-
-          // Paging-related
-          FILE* f_;
     };
 }
 #endif  // SRC_BUFFER_H_

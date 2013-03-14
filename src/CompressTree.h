@@ -123,15 +123,11 @@ namespace cbt {
         uint32_t lastOffset_;
         uint32_t lastElement_;
 
-        /* Slave-threads */
+        // Slave-threads
         bool threadsStarted_;
         pthread_barrier_t threadsBarrier_;
-
         Emptier* emptier_;
         Sorter* sorter_;
-        Merger* merger_;
-        Compressor* compressor_;
-        Decompressor* decompressor_;
     };
 }
 
