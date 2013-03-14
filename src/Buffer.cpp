@@ -44,9 +44,10 @@ namespace cbt {
             hashes_(NULL),
             sizes_(NULL),
             data_(NULL),
-            beg_index_(0),
+            hash_offset_(0),
+            size_offset_(0),
+            data_offset_(0),
             num_(0),
-            beg_offset_(0),
             size_(0),
             fd_(-1) {
 
@@ -445,7 +446,7 @@ namespace cbt {
             aux_list_ = new Buffer::List(/*fd_req = */true);
         else
             aux_list_ = new Buffer::List(/*fd_req = */true,
-                    /*AllocType = */LARGE_ALLOC);
+                    /*AllocType = */List::LARGE_ALLOC);
 
         // Load each of the list heads into the priority queue
         // keep track of offsets for possible deserialization
@@ -708,8 +709,8 @@ namespace cbt {
             paged_in.addList(l);
 
             // set file pointer to beginning offset
-            assert(lseek(cl->fd_, cl->beg_offset_, SEEK_SET) ==
-                    cl->beg_offset_);
+            assert(lseek(cl->fd_, cl->data_offset_, SEEK_SET) ==
+                    cl->data_offset_);
 
             // means the list is PAGED_OUT
             size_t ret1, ret2, ret3;

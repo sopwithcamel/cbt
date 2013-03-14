@@ -22,6 +22,7 @@
 // Author: Hrishikesh Amur
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -259,9 +260,10 @@ namespace cbt {
 
     bool Node::fastSplitLeaf() {
         Node* newLeaf = new Node(tree_, 0);
-        uint32_t new_separator_ = 0;
+        uint32_t new_separator = 0;
         uint32_t buf_size = 64;
         char* buf = (char*)malloc(buf_size);
+        int ret;
 
         for (uint32_t i = 0; i < buffer_.lists_.size(); ++i) {
             Buffer::List* new_list = new Buffer::List(false,
@@ -297,14 +299,15 @@ namespace cbt {
                             fprintf(stderr, "Error: %s\n", strerror(errno));
                             assert(false);
                         }
-                        num += num_hashes_in_buf;
+                        // we need the last element to overlap
+                        num += num_hashes_in_buf - 1;
                         splitIndex = 0;
                     }
                     splitIndex++;
                 } while (h[splitIndex] == h[splitIndex - 1]);
                 
                 // now we know the element that we use to split
-                new_separator_ = h[splitIndex];
+                new_separator = h[splitIndex];
 
                 // for the new list, this element will also be the first element
                 num_elements_in_split_list = off / sizeof(uint32_t) +
@@ -329,24 +332,73 @@ namespace cbt {
                     }
                     low_hash = h[0];
                     high_hash = h[num_hashes_in_buf - 1];
-                    if (new_separator_ < low_hash) {
+                    if (new_separator < low_hash) {
                         off -= buf_size;
-                    } else if (new_separator_ > high_hash) {
+                    } else if (new_separator > high_hash) {
                         off += buf_size;
                     } else
                         break;
                 } while (true);
 
-                // 
+                uint32_t splitIndex = 0;
+                while (h[splitIndex] < new_separator)
+                    splitIndex++;
+
+                // there is one painful corner case to handle: if splitIndex is
+                // 0, then we need to read the previous buffer to ensure that
+                // no other hashes equal to h[splitIndex] sneak in (ie.
+                // h[splitIndex - 1] should not be equal to h[splitIndex]
+                if (splitIndex == 0) {
+                    do {
+                        if (splitIndex == 0) {
+                            // we need one element to overlap
+                            off -= (buf_size - sizeof(uint32_t));
+                            if ((ret = pread64(l->fd_, (void*)buf, buf_size,
+                                    off)) < buf_size) {
+                                fprintf(stderr, "Error: %s\n",
+                                        strerror(errno));
+                                assert(false);
+                            }
+                            splitIndex = num_hashes_in_buf;
+                        }
+                        --splitIndex;
+                    } while (h[splitIndex] == h[splitIndex - 1]);
+                }
+
+                num_elements_in_split_list = off / sizeof(uint32_t) +
+                        splitIndex;
             }
 
+            // setting the offsets into the data part of the buffer requires
+            // more I/Os. The size array now stores the cumulative offsets
+            // (TODO). Reading the (num_elements_in_split_list th) size will
+            // give the beginning offset for the new list.
+
+            uint32_t hash_array_size = l->num_ * sizeof(uint32_t);
+            new_list->hash_offset_ = num_elements_in_split_list *
+                    sizeof(uint32_t);
+            new_list->size_offset_ = hash_array_size +
+                    num_elements_in_split_list * sizeof(uint32_t);
+            uint32_t data_off;
+            assert((pread64(l->fd_, &data_off, sizeof(uint32_t),
+                    new_list->size_offset_) == sizeof(uint32_t)));
+            new_list->data_offset_ = 2 * hash_array_size + data_off;
+
             new_list->num_ = l->num_ - num_elements_in_split_list;
+            new_list->size_ = l->size_ - new_list->data_offset_;
+
+            // the offsets for the split list do not change, but the number of
+            // elements and the size of the data do change.
             l->num_ = num_elements_in_split_list;
+            l->size_ = new_list->data_offset_;
 
-            new_list->beg_index_ = 
-
+            // finally, add the new list into the new leaf buffer.
             newLeaf->buffer_.addList(new_list);
         }
+
+        // set the separators for both leaves
+        newLeaf->separator_ = separator_;
+        separator_ = new_separator;
 
         free(buf);
     }

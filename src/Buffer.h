@@ -67,9 +67,10 @@ namespace cbt {
               char* data_;
 
               // stores list boundaries in file
-              uint32_t beg_index_;
+              uint32_t hash_offset_;
+              uint32_t size_offset_;
+              uint32_t data_offset_;
               uint32_t num_;
-              uint32_t beg_offset_;
               uint32_t size_;
 
               int fd_;
