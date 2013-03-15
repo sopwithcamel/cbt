@@ -116,11 +116,9 @@ namespace cbt {
         }
         uint32_t siz = buffer_.size();        
 
-        if (!isFull()) {
-            buffer_.page_out();
-        } else {
+        buffer_.page_out();
+        if (isFull())
             schedule(EMPTY);
-        }
         return ret;
     }
 
@@ -318,13 +316,17 @@ namespace cbt {
 
                 // read buffer containing the median element
                 uint32_t num = l->num_ / 2;
-                size_t off = num * sizeof(uint32_t);
+                uint32_t low_ind = 0, high_ind = l->num_ - 1;
+                uint32_t splitIndex;
+                size_t off;
                 uint32_t* h = (uint32_t*)buf;
                 uint32_t num_hashes_in_buf = buf_size / sizeof(uint32_t);
                 uint32_t low_hash = 0, high_hash = 0;
                 // we loop and read in buffers until we have found a buffer
                 // that contains the separator element
                 do {
+                    splitIndex = (low_ind + high_ind) >> 1;
+                    off = splitIndex * sizeof(uint32_t);
                     if ((ret = pread64(l->fd_, (void*)buf, buf_size, off)) <
                             buf_size) {
                         fprintf(stderr, "Error: %s\n", strerror(errno));
@@ -333,40 +335,43 @@ namespace cbt {
                     low_hash = h[0];
                     high_hash = h[num_hashes_in_buf - 1];
                     if (new_separator < low_hash) {
-                        off -= buf_size;
+                        high_ind = splitIndex;
                     } else if (new_separator > high_hash) {
-                        off += buf_size;
+                        low_ind = splitIndex;
                     } else
                         break;
                 } while (true);
 
-                uint32_t splitIndex = 0;
-                while (h[splitIndex] < new_separator)
-                    splitIndex++;
+                // we have found the buffer that holds the separator. Now we
+                // roll forward until we find the first value greater than or
+                // equal to the new separator
+                int index_add = 0;
+                while (h[index_add] < new_separator)
+                    index_add++;
 
-                // there is one painful corner case to handle: if splitIndex is
+                // there is one painful corner case to handle: if index_add is
                 // 0, then we need to read the previous buffer to ensure that
-                // no other hashes equal to h[splitIndex] sneak in (ie.
-                // h[splitIndex - 1] should not be equal to h[splitIndex]
-                if (splitIndex == 0) {
+                // no other hashes equal to h[index_add] sneak in (ie.
+                // h[index_add - 1] should not be equal to h[index_add]
+                if (index_add == 0) {
                     do {
-                        if (splitIndex == 0) {
+                        if (index_add == 0) {
                             // we need one element to overlap
-                            off -= (buf_size - sizeof(uint32_t));
+                            splitIndex -= (num_hashes_in_buf - 1);
+                            off = splitIndex * sizeof(uint32_t);
                             if ((ret = pread64(l->fd_, (void*)buf, buf_size,
                                     off)) < buf_size) {
                                 fprintf(stderr, "Error: %s\n",
                                         strerror(errno));
                                 assert(false);
                             }
-                            splitIndex = num_hashes_in_buf;
+                            index_add = num_hashes_in_buf;
                         }
-                        --splitIndex;
-                    } while (h[splitIndex] == h[splitIndex - 1]);
+                        --index_add;
+                    } while (h[index_add] == h[index_add - 1]);
                 }
 
-                num_elements_in_split_list = off / sizeof(uint32_t) +
-                        splitIndex;
+                num_elements_in_split_list = splitIndex + index_add;
             }
 
             // setting the offsets into the data part of the buffer requires
@@ -385,12 +390,13 @@ namespace cbt {
             new_list->data_offset_ = 2 * hash_array_size + data_off;
 
             new_list->num_ = l->num_ - num_elements_in_split_list;
-            new_list->size_ = l->size_ - new_list->data_offset_;
+            new_list->size_ = l->size_ + 2 * hash_array_size -
+                    new_list->data_offset_;
 
             // the offsets for the split list do not change, but the number of
             // elements and the size of the data do change.
             l->num_ = num_elements_in_split_list;
-            l->size_ = new_list->data_offset_;
+            l->size_ = l->size_ - new_list->size_;
 
             // finally, add the new list into the new leaf buffer.
             newLeaf->buffer_.addList(new_list);
@@ -400,7 +406,10 @@ namespace cbt {
         newLeaf->separator_ = separator_;
         separator_ = new_separator;
 
+        parent_->addChild(newLeaf);
+
         free(buf);
+        return true;
     }
 
     void Node::handleFullLeaf() {
@@ -437,14 +446,15 @@ namespace cbt {
         checkSerializationIntegrity();
         // create new leaf
         Node* newLeaf = new Node(tree_, 0);
-        newLeaf->copyIntoBuffer(l, splitIndex, num - splitIndex);
+        // convert sizes to offsets with last argument
+        newLeaf->copyIntoBuffer(l, splitIndex, num - splitIndex, true);
         newLeaf->separator_ = separator_;
 
         // modify this leaf properties
 
         // copy the first half into another list in this buffer and delete
-        // the original list
-        copyIntoBuffer(l, 0, splitIndex);
+        // the original list and convert sizes to offsets with last argument
+        copyIntoBuffer(l, 0, splitIndex, true);
         separator_ = l->hashes_[splitIndex];
         // delete the old list
         delete l;
@@ -473,7 +483,7 @@ namespace cbt {
     }
 
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
-            uint32_t num) {
+            uint32_t num, bool cumulative_sizes) {
 
         // calculate offset
         uint32_t offset = 0;
@@ -506,10 +516,24 @@ namespace cbt {
                 num_bytes);
         l->num_ = num;
         l->size_ = num_bytes;
+        l->hash_offset_ = 0;
+        l->size_offset_ = num * sizeof(uint32_t);
+        l->data_offset_ = l->size_offset_ << 1;
+
+        // convert sizes to offsets
+        if (cumulative_sizes) {
+            offset = 0;
+            uint32_t old_offset = 0;
+            for (uint32_t i = 0; i < num; ++i) {
+                offset += l->sizes_[i];
+                l->sizes_[i] = old_offset;
+                old_offset = offset;
+            }
+        }
 
         buffer_.addList(l);
 
-        checkSerializationIntegrity(buffer_.lists_.size()-1);
+        checkSerializationIntegrity(buffer_.lists_.size() - 1);
         buffer_.checkSortIntegrity(l);
         return true;
     }

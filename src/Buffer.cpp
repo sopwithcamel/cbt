@@ -655,37 +655,38 @@ namespace cbt {
         if (empty())
             return true;
 
+        if (!page())
+            return true;
+
         std::vector<Buffer::List*> lists_c = lists_copy();
         for (uint32_t i = 0; i < lists_c.size(); ++i) {
             Buffer::List* l = lists_c[i];
             if (l->state_ == Buffer::List::PAGED_OUT)
                 continue;
 
-            if (page()) {
-                size_t ret1, ret2, ret3;
-                ret1 = write(l->fd_, l->hashes_, l->num_ * sizeof(uint32_t));
-                ret2 = write(l->fd_, l->sizes_, l->num_ * sizeof(uint32_t));
-                ret3 = write(l->fd_, l->data_, l->size_);
-                if (ret1 != l->num_ * sizeof(uint32_t) ||
-                        ret2 != l->num_ * sizeof(uint32_t) ||
-                        ret3 != l->size_) {
+            size_t ret1, ret2, ret3;
+            ret1 = write(l->fd_, l->hashes_, l->num_ * sizeof(uint32_t));
+            ret2 = write(l->fd_, l->sizes_, l->num_ * sizeof(uint32_t));
+            ret3 = write(l->fd_, l->data_, l->size_);
+            if (ret1 != l->num_ * sizeof(uint32_t) ||
+                    ret2 != l->num_ * sizeof(uint32_t) ||
+                    ret3 != l->size_) {
 #ifdef ENABLE_ASSERT_CHECKS
-                    fprintf(stderr, "Node %d page-out fail! Error: %s\n",
-                            node_->id_, strerror(errno));
-                    fprintf(stderr,
-                            "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
-                            l->num_ * sizeof(uint32_t), ret1,
-                            l->num_ * sizeof(uint32_t), ret2,
-                            l->size_, ret3);
+                fprintf(stderr, "Node %d page-out fail! Error: %s\n",
+                        node_->id_, strerror(errno));
+                fprintf(stderr,
+                        "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\nDL:%ld;RDL:%ld\n",
+                        l->num_ * sizeof(uint32_t), ret1,
+                        l->num_ * sizeof(uint32_t), ret2,
+                        l->size_, ret3);
 #endif  // ENABLE_ASSERT_CHECKS
-                    assert(false);
-                }
-                l->free_buffers();
-                l->state_ = List::PAGED_OUT;
-#ifdef CT_NODE_DEBUG
-                fprintf(stderr, "%d (%lu), ", i, lists_c[i]->num_);
-#endif  // CT_NODE_DEBUG
+                assert(false);
             }
+            l->free_buffers();
+            l->state_ = List::PAGED_OUT;
+#ifdef CT_NODE_DEBUG
+            fprintf(stderr, "%d (%lu), ", i, lists_c[i]->num_);
+#endif  // CT_NODE_DEBUG
         }
 #endif  // ENABLE_COMPRESSION
         return true;

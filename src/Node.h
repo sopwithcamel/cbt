@@ -152,10 +152,13 @@ namespace cbt {
         //    handleFullLeaves() call.
         // 
         bool emptyBuffer();
-        // copy contents from node's buffer into this buffer. Starting from
-        // index = index, copy num elements' data.
-        // 
-        bool copyIntoBuffer(Buffer::List* l, uint32_t index, uint32_t num);
+        // copy contents from parent_list into a new list in this node's
+        // buffer. Starting from index: index, copy num elements. If the last
+        // argument is true, the size array in the new list is converted to
+        // store cumulative sizes.
+        //
+        bool copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
+                uint32_t num, bool cumulative_sizes = false);
 
         // Tree-related functions
 
