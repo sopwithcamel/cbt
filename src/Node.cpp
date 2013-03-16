@@ -291,7 +291,7 @@ namespace cbt {
                     // haven't found a hash that is different from the previous
                     // hash. If this is the case then, we read in another page.
                     if (splitIndex == num_hashes_in_buf) {
-                        off = num * sizeof(uint32_t);
+                        off = l->hash_offset_ + num * sizeof(uint32_t);
                         if ((ret = pread64(l->fd_, (void*)buf, buf_size, off)) <
                                 buf_size) {
                             fprintf(stderr, "Error: %s\n", strerror(errno));
@@ -308,8 +308,8 @@ namespace cbt {
                 new_separator = h[splitIndex];
 
                 // for the new list, this element will also be the first element
-                num_elements_in_split_list = off / sizeof(uint32_t) +
-                        splitIndex;
+                num_elements_in_split_list = (off - l->hash_offset_) /
+                        sizeof(uint32_t) + splitIndex;
             } else {
                 // for other lists, we need to find the first hash value that
                 // is greater than or equal to the separator value
@@ -325,8 +325,9 @@ namespace cbt {
                 // we loop and read in buffers until we have found a buffer
                 // that contains the separator element
                 do {
+                    assert(low_ind < high_ind);
                     splitIndex = (low_ind + high_ind) >> 1;
-                    off = splitIndex * sizeof(uint32_t);
+                    off = l->hash_offset_ + splitIndex * sizeof(uint32_t);
                     if ((ret = pread64(l->fd_, (void*)buf, buf_size, off)) <
                             buf_size) {
                         fprintf(stderr, "Error: %s\n", strerror(errno));
@@ -358,7 +359,8 @@ namespace cbt {
                         if (index_add == 0) {
                             // we need one element to overlap
                             splitIndex -= (num_hashes_in_buf - 1);
-                            off = splitIndex * sizeof(uint32_t);
+                            off = l->hash_offset_ + splitIndex *
+                                    sizeof(uint32_t);
                             if ((ret = pread64(l->fd_, (void*)buf, buf_size,
                                     off)) < buf_size) {
                                 fprintf(stderr, "Error: %s\n",
@@ -374,24 +376,25 @@ namespace cbt {
                 num_elements_in_split_list = splitIndex + index_add;
             }
 
-            // setting the offsets into the data part of the buffer requires
-            // more I/Os. The size array now stores the cumulative offsets
-            // (TODO). Reading the (num_elements_in_split_list th) size will
-            // give the beginning offset for the new list.
-
-            uint32_t hash_array_size = l->num_ * sizeof(uint32_t);
-            new_list->hash_offset_ = num_elements_in_split_list *
-                    sizeof(uint32_t);
-            new_list->size_offset_ = hash_array_size +
+            new_list->hash_offset_ = l->hash_offset_ +
                     num_elements_in_split_list * sizeof(uint32_t);
-            uint32_t data_off;
-            assert((pread64(l->fd_, &data_off, sizeof(uint32_t),
-                    new_list->size_offset_) == sizeof(uint32_t)));
-            new_list->data_offset_ = 2 * hash_array_size + data_off;
+            new_list->size_offset_ = l->size_offset_ +
+                    num_elements_in_split_list * sizeof(uint32_t);
 
+            // setting the offsets into the data part of the buffer requires
+            // more I/Os. The size array stores the cumulative offsets, so the
+            // difference between (num_elements_in_split_list th) and first
+            // sizes will give the beginning offset for the new list.
+            uint32_t cumu_size_at_split, cumu_size_at_beg;
+            assert((pread64(l->fd_, &cumu_size_at_split, sizeof(uint32_t),
+                    new_list->size_offset_) == sizeof(uint32_t)));
+            assert((pread64(l->fd_, &cumu_size_at_beg, sizeof(uint32_t),
+                    l->size_offset_) == sizeof(uint32_t)));
+            new_list->data_offset_ = l->data_offset_ +
+                    cumu_size_at_split - cumu_size_at_beg;
             new_list->num_ = l->num_ - num_elements_in_split_list;
-            new_list->size_ = l->size_ + 2 * hash_array_size -
-                    new_list->data_offset_;
+            new_list->size_ = l->size_ -
+                    (cumu_size_at_split - cumu_size_at_beg);
 
             // the offsets for the split list do not change, but the number of
             // elements and the size of the data do change.

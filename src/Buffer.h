@@ -129,6 +129,8 @@ namespace cbt {
           // Aggregation-related
           bool aggregate(bool isSort);
 
+          // checks if the required number of bytes were read or written
+          void checkIO(size_t done, size_t req);
           bool checkSortIntegrity(List* l);
 
         private:

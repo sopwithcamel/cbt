@@ -710,29 +710,40 @@ namespace cbt {
             paged_in.addList(l);
 
             // set file pointer to beginning offset
-            assert(lseek(cl->fd_, cl->data_offset_, SEEK_SET) ==
-                    cl->data_offset_);
+            assert(lseek(cl->fd_, cl->hash_offset_, SEEK_SET) ==
+                    cl->hash_offset_);
 
-            // means the list is PAGED_OUT
-            size_t ret1, ret2, ret3;
-            ret1 = read(cl->fd_, l->hashes_, cl->num_ * sizeof(uint32_t));
-            ret2 = read(cl->fd_, l->sizes_, cl->num_ * sizeof(uint32_t));
-            ret3 = read(cl->fd_, l->data_, cl->size_);
-            if (ret1 != cl->num_ * sizeof(uint32_t) ||
-                    ret2 != cl->num_ * sizeof(uint32_t) ||
-                    ret3 != cl->size_) {
-#ifdef ENABLE_ASSERT_CHECKS
-                fprintf(stderr, "Node %d page-in fail! Error: %s\n",
-                        node_->id_, strerror(errno));
-                fprintf(stderr,
-                        "HL:%ld;RHL:%ld\nSL:%ld;RSL:%ld\n\
-                        DL:%ld;RDL:%ld\n",
-                        cl->num_ * sizeof(uint32_t), ret1,
-                        cl->num_ * sizeof(uint32_t), ret2,
-                        cl->size_, ret3);
-#endif  // ENABLE_ASSERT_CHECKS
-                assert(false);
+            size_t byt, ret, byt_to_read;
+
+            // read in hashes
+            byt = 0;
+            byt_to_read = cl->num_ * sizeof(uint32_t);
+            while (byt < byt_to_read) {
+                if ((ret = read(cl->fd_, l->hashes_, byt_to_read - byt)) <= 0)
+                    break;
+                byt += ret;
             }
+            checkIO(byt, byt_to_read);
+
+            // read in sizes
+            byt = 0;
+            byt_to_read = cl->num_ * sizeof(uint32_t);
+            while (byt < byt_to_read) {
+                if ((ret = read(cl->fd_, l->sizes_, byt_to_read - byt)) <= 0)
+                    break;
+                byt += ret;
+            }
+            checkIO(byt, byt_to_read);
+
+            // read in data
+            byt = 0;
+            byt_to_read = cl->size_;
+            while (byt < byt_to_read) {
+                if ((ret = read(cl->fd_, l->data_, byt_to_read - byt)) <= 0)
+                    break;
+                byt += ret;
+            }
+            checkIO(byt, byt_to_read);
 
             cl->free_buffers();
             cl->hashes_ = l->hashes_;
@@ -768,7 +779,21 @@ namespace cbt {
         }
         return false;
 */
+        if (node_->level() > 0)
+            return false;
         return true;
+    }
+
+    void Buffer::checkIO(size_t done, size_t req) {
+        if (done != req) {
+#ifdef ENABLE_ASSERT_CHECKS
+            fprintf(stderr, "Node %d I/O fail! Error: %s\n",
+                    node_->id_, strerror(errno));
+            fprintf(stderr, "Requested: %ld; Performed: %ld\n",
+                    req, done);
+#endif  // ENABLE_ASSERT_CHECKS
+            assert(false);
+        }
     }
 
     bool Buffer::checkSortIntegrity(List* l) {
