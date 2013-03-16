@@ -263,6 +263,11 @@ namespace cbt {
         char* buf = (char*)malloc(buf_size);
         int ret;
 
+        // check if the size of each list has become too small. If so, then do
+        // a real split (by paging in, merging and paging out).
+        if (buffer_.lists_[0]->size_ < 1048576)
+            return false;
+
         for (uint32_t i = 0; i < buffer_.lists_.size(); ++i) {
             Buffer::List* new_list = new Buffer::List(false,
                     Buffer::List::NO_ALLOC);
@@ -741,6 +746,21 @@ namespace cbt {
                     }
                     if (!rootFlag) {
                         buffer_.page_in();
+                        // 1. this condition checks whether a leaf is being
+                        // split for real. This could happen because the lists
+                        // in the leaf have become too small for
+                        // fastSplitLeaf(). The latter function requires sizes
+                        // in offset mode, but merge(), aggregate() etc. work
+                        // in size mode, so we need to convert them back. The
+                        // reconversion to offset happens in copyIntoBuffer().
+                        //
+                        // 2. after this, we also close the old file
+                        // descriptors for this leaf. The page_out() function
+                        // will choose new file descriptors when paging out.
+                        if (leafFlag) {
+                            buffer_.convertOffsetsToSize();
+                            buffer_.changeFileDescriptors();
+                        }
                         buffer_.merge();
                         buffer_.aggregate(/*isSort = */false);
                     }

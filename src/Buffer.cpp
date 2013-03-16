@@ -181,6 +181,36 @@ namespace cbt {
         node_ = n;
     }
 
+    void Buffer::convertOffsetsToSize() {
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
+            Buffer::List* l = lists_[i];
+            for (uint32_t j = 0; j < l->num_ - 1; ++j)
+                l->sizes_[j] = l->sizes_[j + 1] - l->sizes_[j];
+            l->sizes_[l->num_ - 1] = l->size_ - l->sizes_[l->num_ - 1];
+        }
+    }
+
+    void Buffer::changeFileDescriptors() {
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
+            close(lists_[i]->fd_);
+            lists_[i]->fd_ = -1;
+
+            // get new file descriptor
+            do {
+                stringstream ss;
+                ss << "/mnt/hamur/cbt_data/" << rand() << ".buf";
+                lists_[i]->filename_ = ss.str();
+                lists_[i]->fd_ = open(lists_[i]->filename_.c_str(),
+                        O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+            } while (lists_[i]->fd_ < 0 && errno == EEXIST);
+
+            if (lists_[i]->fd_ < 0) {
+                fprintf(stderr, "Error opening file: %s\n", strerror(errno));
+                assert(false);
+            }
+        }
+    }
+
     void Buffer::quicksort(uint32_t uleft, uint32_t uright) {
         int32_t i, j, stack_pointer = -1;
         int32_t left = uleft;
@@ -709,13 +739,11 @@ namespace cbt {
             List* l = new List();
             paged_in.addList(l);
 
-            // set file pointer to beginning offset
-            assert(lseek(cl->fd_, cl->hash_offset_, SEEK_SET) ==
-                    cl->hash_offset_);
-
             size_t byt, ret, byt_to_read;
 
             // read in hashes
+            assert(lseek(cl->fd_, cl->hash_offset_, SEEK_SET) ==
+                    cl->hash_offset_);
             byt = 0;
             byt_to_read = cl->num_ * sizeof(uint32_t);
             while (byt < byt_to_read) {
@@ -726,6 +754,8 @@ namespace cbt {
             checkIO(byt, byt_to_read);
 
             // read in sizes
+            assert(lseek(cl->fd_, cl->size_offset_, SEEK_SET) ==
+                    cl->size_offset_);
             byt = 0;
             byt_to_read = cl->num_ * sizeof(uint32_t);
             while (byt < byt_to_read) {
@@ -736,6 +766,8 @@ namespace cbt {
             checkIO(byt, byt_to_read);
 
             // read in data
+            assert(lseek(cl->fd_, cl->data_offset_, SEEK_SET) ==
+                    cl->data_offset_);
             byt = 0;
             byt_to_read = cl->size_;
             while (byt < byt_to_read) {

@@ -116,6 +116,10 @@ namespace cbt {
           bool page_out();
           bool page_in();
           void set_pageable(bool flag);
+          void convertOffsetsToSize();
+          // TODO: Also unlink() the file if all file descriptors have been
+          // closed
+          void changeFileDescriptors();
 
           // Sorting-related
           void quicksort(uint32_t left, uint32_t right);
