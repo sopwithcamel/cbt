@@ -145,6 +145,12 @@ namespace cbt {
             return true;
         }
 
+        // if children are leaves, then sizes are to be stored in offset mode
+        // as this allows fast-splitting.
+        bool offset_mode = false;
+        if (level() == 1)
+            offset_mode = true;
+
         // work on a copy of the children vector because spilling may cause one
         // or more children (if they are leaves) to split and modify the real
         // children vector
@@ -190,7 +196,7 @@ namespace cbt {
                     if (curElement > lastElement) {
                         // copy elements into child
                         children_copy[curChild]->copyIntoBuffer(l, lastElement,
-                                curElement - lastElement);
+                                curElement - lastElement, offset_mode);
 #ifdef CT_NODE_DEBUG
                         fprintf(stderr, "Copied %u elements into node %d\
                                  list:%lu\n",
@@ -223,7 +229,7 @@ namespace cbt {
             if (curElement >= lastElement) {
                 // copy elements into child
                 children_copy[curChild]->copyIntoBuffer(l, lastElement,
-                        curElement - lastElement);
+                        curElement - lastElement, offset_mode);
 #ifdef CT_NODE_DEBUG
                 fprintf(stderr, "Copied %u elements into node %d; \
                         list: %lu\n",
@@ -491,7 +497,7 @@ namespace cbt {
     }
 
     bool Node::copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
-            uint32_t num, bool cumulative_sizes) {
+            uint32_t num, bool offset_mode) {
 
         // calculate offset
         uint32_t offset = 0;
@@ -529,7 +535,7 @@ namespace cbt {
         l->data_offset_ = l->size_offset_ << 1;
 
         // convert sizes to offsets
-        if (cumulative_sizes) {
+        if (offset_mode) {
             offset = 0;
             uint32_t old_offset = 0;
             for (uint32_t i = 0; i < num; ++i) {

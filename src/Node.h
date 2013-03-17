@@ -155,10 +155,10 @@ namespace cbt {
         // copy contents from parent_list into a new list in this node's
         // buffer. Starting from index: index, copy num elements. If the last
         // argument is true, the size array in the new list is converted to
-        // store cumulative sizes.
+        // store offsets.
         //
         bool copyIntoBuffer(Buffer::List* parent_list, uint32_t index,
-                uint32_t num, bool cumulative_sizes = false);
+                uint32_t num, bool offset_mode);
 
         // Tree-related functions
 

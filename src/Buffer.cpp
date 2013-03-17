@@ -184,9 +184,11 @@ namespace cbt {
     void Buffer::convertOffsetsToSize() {
         for (uint32_t i = 0; i < lists_.size(); ++i) {
             Buffer::List* l = lists_[i];
+            uint32_t first = l->sizes_[0];
             for (uint32_t j = 0; j < l->num_ - 1; ++j)
                 l->sizes_[j] = l->sizes_[j + 1] - l->sizes_[j];
-            l->sizes_[l->num_ - 1] = l->size_ - l->sizes_[l->num_ - 1];
+            l->sizes_[l->num_ - 1] = l->size_ - (l->sizes_[l->num_ - 1] -
+                    first);
         }
     }
 
