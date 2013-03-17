@@ -846,6 +846,8 @@ namespace cbt {
         }
         return false;
 */
+        if (node_->level() > 0)
+            return false;
         return true;
     }
 
