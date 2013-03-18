@@ -744,36 +744,33 @@ namespace cbt {
             size_t byt, ret, byt_to_read;
 
             // read in hashes
-            assert(lseek(cl->fd_, cl->hash_offset_, SEEK_SET) ==
-                    cl->hash_offset_);
             byt = 0;
             byt_to_read = cl->num_ * sizeof(uint32_t);
             while (byt < byt_to_read) {
-                if ((ret = read(cl->fd_, l->hashes_, byt_to_read - byt)) <= 0)
+                if ((ret = pread(cl->fd_, l->hashes_, byt_to_read - byt,
+                        cl->hash_offset_ + byt)) <= 0)
                     break;
                 byt += ret;
             }
             checkIO(byt, byt_to_read);
 
             // read in sizes
-            assert(lseek(cl->fd_, cl->size_offset_, SEEK_SET) ==
-                    cl->size_offset_);
             byt = 0;
             byt_to_read = cl->num_ * sizeof(uint32_t);
             while (byt < byt_to_read) {
-                if ((ret = read(cl->fd_, l->sizes_, byt_to_read - byt)) <= 0)
+                if ((ret = pread(cl->fd_, l->sizes_, byt_to_read - byt,
+                        cl->size_offset_ + byt)) <= 0)
                     break;
                 byt += ret;
             }
             checkIO(byt, byt_to_read);
 
             // read in data
-            assert(lseek(cl->fd_, cl->data_offset_, SEEK_SET) ==
-                    cl->data_offset_);
             byt = 0;
             byt_to_read = cl->size_;
             while (byt < byt_to_read) {
-                if ((ret = read(cl->fd_, l->data_, byt_to_read - byt)) <= 0)
+                if ((ret = pread(cl->fd_, l->data_, byt_to_read - byt,
+                        cl->data_offset_ + byt)) <= 0)
                     break;
                 byt += ret;
             }
