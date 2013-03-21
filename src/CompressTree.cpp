@@ -38,6 +38,9 @@ namespace cbt {
     uint32_t MAX_ELS_PER_BUFFER;
     uint32_t EMPTY_THRESHOLD;
 
+    std::map<int, int> fd_map;
+    pthread_mutex_t fd_map_mutex = PTHREAD_MUTEX_INITIALIZER;
+
     CompressTree::CompressTree(uint32_t a, uint32_t b, uint32_t nodesInMemory,
                 uint32_t buffer_size, uint32_t pao_size,
                 const Operations* const ops) :
@@ -426,5 +429,32 @@ namespace cbt {
         newRoot->addChild(otherChild);
         rootNode_ = newRoot;
         return true;
+    }
+
+    // Global functions
+
+    void inc_fd_ref_count(int fd) {
+        std::map<int,int>::iterator it;
+        pthread_mutex_lock(&fd_map_mutex);
+        it = fd_map.find(fd);
+        if (it == fd_map.end())
+            fd_map[fd] = 1;
+        else
+            ++it->second;
+        pthread_mutex_unlock(&fd_map_mutex);
+    }
+
+    bool dec_fd_ref_count(int fd) {
+        std::map<int,int>::iterator it;
+        bool ret = false;
+        pthread_mutex_lock(&fd_map_mutex);
+        it = fd_map.find(fd);
+        assert(it != fd_map.end());
+        if (--it->second == 0) {
+            fd_map.erase(fd);
+            ret = true;
+        }
+        pthread_mutex_unlock(&fd_map_mutex);
+        return ret;
     }
 }

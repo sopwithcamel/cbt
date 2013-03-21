@@ -114,8 +114,6 @@ namespace cbt {
             schedule(EMPTY);
             return ret;
         }
-        uint32_t siz = buffer_.size();        
-
         buffer_.page_out();
         if (isFull())
             schedule(EMPTY);
@@ -140,6 +138,7 @@ namespace cbt {
                         %u/%u\n", id_, buffer_.size(), EMPTY_THRESHOLD);
 #endif
             } else {  // compress
+                buffer_.convertSizesToOffsets();
                 buffer_.page_out();
             }
             return true;
@@ -279,10 +278,15 @@ namespace cbt {
                     Buffer::List::NO_ALLOC);
             Buffer::List* l = buffer_.lists_[i];
 
-            if ((new_list->fd_ = dup(l->fd_)) < 0) {
-                fprintf(stderr, "Error: %s\n", strerror(errno));
-                assert(false);
-            }
+            // set the new list file descriptor equal to the split list one. We
+            // don't use dup() because we are tracking the number of references
+            // to open file descriptors and call close() + unlink() when this
+            // drops to 0.
+            assert(l->fd_ > 0);
+            new_list->fd_ = l->fd_;
+            new_list->filename_ = l->filename_;
+            inc_fd_ref_count(l->fd_);
+
             new_list->state_ = Buffer::List::PAGED_OUT;
 
             // for each list, we wish to find where the list will be split
@@ -293,7 +297,7 @@ namespace cbt {
                 // the separator for the entire node split.
 
                 uint32_t num = l->num_ / 2;
-                size_t off;
+                size_t off = 0;
                 uint32_t* h = (uint32_t*)buf;
                 uint32_t num_hashes_in_buf = buf_size / sizeof(uint32_t);
                 uint32_t splitIndex = num_hashes_in_buf;
@@ -326,7 +330,6 @@ namespace cbt {
                 // is greater than or equal to the separator value
 
                 // read buffer containing the median element
-                uint32_t num = l->num_ / 2;
                 uint32_t low_ind = 0, high_ind = l->num_ - 1;
                 uint32_t splitIndex;
                 size_t off;
@@ -336,7 +339,9 @@ namespace cbt {
                 // we loop and read in buffers until we have found a buffer
                 // that contains the separator element
                 do {
+#ifdef ENABLE_ASSERT_CHECKS
                     assert(low_ind < high_ind);
+#endif  // ENABLE_ASSERT_CHECKS
                     splitIndex = (low_ind + high_ind) >> 1;
                     off = l->hash_offset_ + splitIndex * sizeof(uint32_t);
                     if ((ret = pread64(l->fd_, (void*)buf, buf_size, off)) <
@@ -547,6 +552,8 @@ namespace cbt {
 
         buffer_.addList(l);
 
+        assert(l->size_offset_ > l->hash_offset_);
+
         checkSerializationIntegrity(buffer_.lists_.size() - 1);
         buffer_.checkSortIntegrity(l);
         return true;
@@ -746,7 +753,7 @@ namespace cbt {
             case EMPTY:
                 {
                     // check for fast case of splitting leaves
-                    if (!rootFlag && leafFlag) {
+                    if (!rootFlag && leafFlag && tree_->emptyType_ != FLUSH) {
                         if (fastSplitLeaf())
                             break; 
                     }
@@ -764,7 +771,7 @@ namespace cbt {
                         // descriptors for this leaf. The page_out() function
                         // will choose new file descriptors when paging out.
                         if (leafFlag) {
-                            buffer_.convertOffsetsToSize();
+                            buffer_.convertOffsetsToSizes();
                             buffer_.changeFileDescriptors();
                         }
                         buffer_.merge();

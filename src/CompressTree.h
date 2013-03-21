@@ -28,6 +28,7 @@
 #include <semaphore.h>
 #include <deque>
 #include <queue>
+#include <map>
 #include <vector>
 #include "Config.h"
 #include "Node.h"
@@ -38,6 +39,11 @@ namespace cbt {
     extern uint32_t BUFFER_SIZE;
     extern uint32_t MAX_ELS_PER_BUFFER;
     extern uint32_t EMPTY_THRESHOLD;
+
+    extern std::map<int, int> fd_map;
+    extern pthread_mutex_t fd_map_mutex;
+    extern void inc_fd_ref_count(int fd);
+    extern bool dec_fd_ref_count(int fd);
 
     enum CompressAlgorithm {
         SNAPPY,

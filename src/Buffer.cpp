@@ -70,6 +70,7 @@ namespace cbt {
                 filename_ = ss.str();
                 fd_ = open(filename_.c_str(), O_RDWR | O_CREAT | O_EXCL,
                         S_IRUSR | S_IWUSR);
+                inc_fd_ref_count(fd_);
             } while (fd_ < 0 && errno == EEXIST);
             if (fd_ < 0) {
                 fprintf(stderr, "Error opening file: %s\n", strerror(errno));
@@ -181,7 +182,7 @@ namespace cbt {
         node_ = n;
     }
 
-    void Buffer::convertOffsetsToSize() {
+    void Buffer::convertOffsetsToSizes() {
         for (uint32_t i = 0; i < lists_.size(); ++i) {
             Buffer::List* l = lists_[i];
             uint32_t first = l->sizes_[0];
@@ -192,10 +193,35 @@ namespace cbt {
         }
     }
 
+    void Buffer::convertSizesToOffsets() {
+        for (uint32_t i = 0; i < lists_.size(); ++i) {
+            Buffer::List* l = lists_[i];
+            uint32_t offset = 0;
+            uint32_t old_offset = 0;
+            for (uint32_t j = 0; j < l->num_; ++j) {
+                offset += l->sizes_[j];
+                l->sizes_[j] = old_offset;
+                old_offset = offset;
+            }
+        }
+    }
+
     void Buffer::changeFileDescriptors() {
         for (uint32_t i = 0; i < lists_.size(); ++i) {
-            close(lists_[i]->fd_);
+            if (dec_fd_ref_count(lists_[i]->fd_)) {
+                if (close(lists_[i]->fd_) < 0) {
+                    fprintf(stderr, "Error closing file: %s\n",
+                            strerror(errno));
+                    assert(false);
+                }
+                if (unlink(lists_[i]->filename_.c_str()) < 0) {
+                    fprintf(stderr, "Error unlinking file: %s\n",
+                            strerror(errno));
+                    assert(false);
+                }
+            }
             lists_[i]->fd_ = -1;
+            lists_[i]->filename_ = "";
 
             // get new file descriptor
             do {
@@ -677,6 +703,15 @@ namespace cbt {
         deallocate();
         lists_ = aux.lists_;
         aux.clear();
+
+        // set offsets for list in the case where the leaf is not full (and
+        // hence doesn't get split). In this case, splitLeaf() will not be
+        // called and the offsets would remain unset otherwise.
+
+        lists_[0]->hash_offset_ = 0;
+        lists_[0]->size_offset_ = lists_[0]->num_ * sizeof(uint32_t);
+        lists_[0]->data_offset_ = lists_[0]->size_offset_ << 1;
+
         return true;
     }
 
