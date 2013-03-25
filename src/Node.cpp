@@ -753,7 +753,11 @@ namespace cbt {
             case EMPTY:
                 {
                     // check for fast case of splitting leaves
-                    if (!rootFlag && leafFlag && tree_->emptyType_ != FLUSH) {
+                    if (!rootFlag && leafFlag) {
+                        // we don't need to unnecessarily split while flushing
+                        // at the end.
+                        if (!isFull() && tree_->emptyType_ == FLUSH)
+                            break;
                         if (fastSplitLeaf())
                             break; 
                     }
